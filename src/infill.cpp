@@ -91,7 +91,7 @@ void Infill::generateTroctInfill(Polygons& result, double rotation)
 
     uint64_t Zscale = SQRT2MUL(lineSpacing);
 
-    int offset = abs(posZ % (Zscale) - (Zscale/2)) - (Zscale/4);
+    int offset = abs(posZ % ((int)Zscale) - ((int)Zscale/2)) - (Zscale/4);
     boundary.min.X = ((boundary.min.X / lineSpacing) - 1) * lineSpacing;
     boundary.min.Y = ((boundary.min.Y / lineSpacing) - 1) * lineSpacing;
 
@@ -139,7 +139,7 @@ void Infill::generateTroctInfill(Polygons& result, double rotation)
       }
     }
     // Generate tops / bottoms of octohedrons
-    if(abs((abs(offset) - Zscale/4)) < (extrusionWidth/2)){
+    if(abs((abs(offset) - (int)Zscale/4)) < (extrusionWidth/2)){
       uint64_t startLine = (offset < 0) ? 0 : 1;
       uint64_t coverWidth = OCTSLEN(lineSpacing);
       std::vector<Point> points;
