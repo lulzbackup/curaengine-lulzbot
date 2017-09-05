@@ -13,10 +13,13 @@
 #include "mesh.h"
 #include "MeshGroup.h"
 #include "PrimeTower.h"
+#include "TopSurface.h"
 #include "gcodeExport.h" // CoastingConfig
+#include "SupportInfillPart.h"
 
 namespace cura 
 {
+
 /*!
  * A SkinPart is a connected area designated as top and/or bottom skin. 
  * Surrounding each non-bridged skin area with an outline may result in better top skins.
@@ -27,7 +30,12 @@ class SkinPart
 public:
     PolygonsPart outline;           //!< The skinOutline is the area which needs to be 100% filled to generate a proper top&bottom filling. It's filled by the "skin" module.
     std::vector<Polygons> insets;   //!< The skin can have perimeters so that the skin lines always start at a perimeter instead of in the middle of an infill cell.
+    Polygons perimeter_gaps; //!< The gaps between the extra skin walls and gaps between the outer skin wall and the inner part inset
+    Polygons inner_infill; //!< The inner infill of the skin with which the area within the innermost inset is filled
+    Polygons roofing_fill; //!< The inner infill which has air directly above
 };
+
+
 /*!
     The SliceLayerPart is a single enclosed printable area for a single layer. (Also known as islands)
     It's filled during the FffProcessor.processSliceData(.), where each step uses data from the previous steps.
@@ -40,7 +48,10 @@ public:
     PolygonsPart outline;       //!< The outline is the first member that is filled, and it's filled with polygons that match a cross section of the 3D model. The first polygon is the outer boundary polygon and the rest are holes.
     Polygons print_outline; //!< An approximation to the outline of what's actually printed, based on the outer wall. Too small parts will be omitted compared to the outline.
     std::vector<Polygons> insets;         //!< The insets are generated with. The insets are also known as perimeters or the walls.
+    Polygons perimeter_gaps; //!< The gaps between consecutive walls and between the inner wall and outer skin inset
+    Polygons outline_gaps; //!< The gaps between the outline of the mesh and the first wall. a.k.a. thin walls.
     std::vector<SkinPart> skin_parts;     //!< The skin parts which are filled for 100% with lines and/or insets.
+
     /*!
      * The areas inside of the mesh.
      * Like SliceLayerPart::outline, this class member is not used to actually determine the feature area,
@@ -62,8 +73,44 @@ public:
     /*!
      * The areas which need to be filled with sparse (0-99%) infill for different thicknesses.
      * The infill_area is an array to support thicker layers of sparse infill and areas of different infill density.
+     *
+     * Take an example of infill_area[x][n], the meanings of the indexes are as follows:
+     *   x  -  The sparsity of the infill area (0 - 99 in percentage). So, the areas in infill_area[x] are the most dense ones.
+     *   n  -  The thickness (in number of layers) of the infill area. See example below:
+     *          / ------ -- /         <- layer 3
+     *        /-- ------ /            <- layer 2
+     *          1   2     3
+     * LEGEND: "-" means infill areas.
+     * Numbers 1, 2 and 3 identifies 3 different infill areas. Infill areas 1 and 3 have a tickness of 1 layer, while area 2 has a thickness of 2.
+     *
+     * After the areas have been categoried into different densities, overlapping parts with the same density on multiple layers
+     * will be combined into a single layer. Here is an illustration:
+     *
+     *                        *a group of 3 layers*
+     *       NOT COMBINED                                   COMBINED
+     *
+     *       /22222222 2 2/                                  /22222222 2 2/     <--  the 2 layers next to the middle part are combined into a single layer
+     *     /0 22222222 2/              ====>               /0 ........ 2/
+     *   /0 1 22222222/                                  /0 1 ......../         <--  the 3 layers in the middle part are combined into a single layer
+     *                                                      ^          ^
+     *                                                      |          |
+     *                                                      |          |-- those two density level 2 layers cannot not be combined in the current implementation.
+     *                                                      |              this is because we separate every N layers into groups, and try to combine the layers
+     *                                                      |              in each group starting from the bottom one. In this case, those two layers don't have a
+     *                                                      |              bottom layer in this group, so they cannot be combined.
+     *                                                      |              (TODO) this can be a good future work.
+     *                                                      |
+     *                                                      |-- ideally, those two layer can be combined as well, but it is not the case now.
+     *                                                          (TODO) this can be a good future work.
+     *
+     * NOTES:
+     *   - numbers represent the density levels of each infill
+     *
+     * This maximum number of layers we can combine is a user setting. This number, say "n", means the maximum number of layers we can combine into one.
+     * On the combined layers, the extrusion amount will be higher than the normal extrusion amount because it needs to extrude for multiple layers instead of one.
+     *
      * infill_area[x][n] is infill_area of (n+1) layers thick. 
-     * 
+     *
      * infill_area[0] corresponds to the most dense infill area.
      * infill_area[x] will lie fully inside infill_area[x+1].
      * infill_area_per_combine_per_density.back()[0] == part.infill area initially
@@ -78,11 +125,13 @@ public:
     Polygons& getOwnInfillArea();
 
     /*!
-     * Return whether this part has printable areas / perimeters
+     * Get the infill_area_own (or when it's not instantiated: the normal infill_area)
+     * \see SliceLayerPart::infill_area_own
+     * \return the own infill area
      */
-    bool isUsed(const SettingsBaseVirtual& mesh_settings) const;
+    const Polygons& getOwnInfillArea() const;
 
-    std::vector<std::pair<Polygons, double>> spaghetti_infill_volumes; //!< For each filling volume on this layer, the area within which to fill and the total volume to fill over the area
+    std::vector<std::pair<Polygons, double>> spaghetti_infill_volumes; //!< For each filling volume on this layer, the area within which to fill and the total volume (in mm3) to fill over the area
 };
 
 /*!
@@ -96,6 +145,14 @@ public:
     int printZ;     //!< The height at which this layer needs to be printed. Can differ from sliceZ due to the raft.
     std::vector<SliceLayerPart> parts;  //!< An array of LayerParts which contain the actual data. The parts are printed one at a time to minimize travel outside of the 3D model.
     Polygons openPolyLines; //!< A list of lines which were never hooked up into a 2D polygon. (Currently unused in normal operation)
+
+    /*!
+     * \brief The parts of the model that are exposed at the very top of the
+     * model.
+     *
+     * This is filled only when the top surface is needed.
+     */
+    TopSurface* top_surface = nullptr;
 
     /*!
      * Get the all outlines of all layer parts in this layer.
@@ -129,15 +186,27 @@ public:
 };
 
 /******************/
+
+
+
+
 class SupportLayer
 {
 public:
-    Polygons supportAreas; //!< normal support areas
-    Polygons support_bottom; //!< Piece of support below the support and above the model. This must not overlap with supportAreas or support_roof.
-    Polygons support_roof; //!< Piece of support above the support and below the model. This must not overlap with supportAreas or support_bottom.
+    std::vector<SupportInfillPart> support_infill_parts;  //!< a list of support infill parts
+    Polygons support_bottom; //!< Piece of support below the support and above the model. This must not overlap with any of the support_infill_parts or support_roof.
+    Polygons support_roof; //!< Piece of support above the support and below the model. This must not overlap with any of the support_infill_parts or support_bottom.
     Polygons support_mesh_drop_down; //!< Areas from support meshes which should be supported by more support
     Polygons support_mesh; //!< Areas from support meshes which should NOT be supported by more support
     Polygons anti_overhang; //!< Areas where no overhang should be detected.
+
+    /*!
+     * Exclude the given polygons from the support infill areas and update the SupportInfillParts.
+     *
+     * \param exclude_polygons The polygons to exclude
+     * \param exclude_polygons_boundary_box The boundary box for the polygons to exclude
+     */
+    void excludeAreasFromSupportInfillAreas(const Polygons& exclude_polygons, const AABB& exclude_polygons_boundary_box);
 };
 
 class SupportStorage
@@ -168,18 +237,39 @@ public:
     int layer_nr_max_filled_layer; //!< the layer number of the uppermost layer with content (modified while infill meshes are processed)
 
     std::vector<int> infill_angles; //!< a list of angle values (in degrees) which is cycled through to determine the infill angle of each layer
+    std::vector<int> roofing_angles; //!< a list of angle values (in degrees) which is cycled through to determine the roofing angle of each layer
     std::vector<int> skin_angles; //!< a list of angle values (in degrees) which is cycled through to determine the skin angle of each layer
+    AABB3D bounding_box; //!< the mesh's bounding box
     SubDivCube* base_subdiv_cube;
 
-    SliceMeshStorage(SettingsBaseVirtual* settings, unsigned int slice_layer_count)
-    : SettingsMessenger(settings)
+    SliceMeshStorage(Mesh* mesh, unsigned int slice_layer_count)
+    : SettingsMessenger(mesh)
     , layer_nr_max_filled_layer(0)
+    , bounding_box(mesh->getAABB())
     , base_subdiv_cube(nullptr)
     {
         layers.resize(slice_layer_count);
     }
 
     virtual ~SliceMeshStorage();
+
+    /*!
+     * \param extruder_nr The extruder for which to check
+     * \return whether a particular extruder is used by this mesh
+     */
+    bool getExtruderIsUsed(int extruder_nr) const;
+
+    /*!
+     * \param extruder_nr The extruder for which to check
+     * \param layer_nr the layer for which to check
+     * \return whether a particular extruder is used by this mesh on a particular layer
+     */
+    bool getExtruderIsUsed(int extruder_nr, int layer_nr) const;
+
+    /*!
+     * \return the mesh's user specified z seam hint
+     */
+    Point getZSeamHint() const;
 };
 
 class SliceDataStorage : public SettingsMessenger, NoCopy

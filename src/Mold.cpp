@@ -52,6 +52,11 @@ void Mold::process(SliceDataStorage& storage, std::vector<Slicer*>& slicer_list,
             }
             coord_t width = mesh.getSettingInMicrons("mold_width");
             coord_t open_polyline_width = mesh.getSettingInMicrons("wall_line_width_0");
+            if (layer_nr == 0)
+            {
+                const ExtruderTrain& train_wall_0 = *storage.meshgroup->getExtruderTrain(mesh.getSettingAsExtruderNr("wall_0_extruder_nr"));
+                open_polyline_width *= train_wall_0.getSettingAsRatio("initial_layer_line_width_factor");
+            }
             double angle = mesh.getSettingInAngleDegrees("mold_angle");
             coord_t roof_height = mesh.getSettingInMicrons("mold_roof_height");
 
@@ -91,6 +96,11 @@ void Mold::process(SliceDataStorage& storage, std::vector<Slicer*>& slicer_list,
         // carve molds out of all other models
         for (unsigned int mesh_idx = 0; mesh_idx < slicer_list.size(); mesh_idx++)
         {
+            const Mesh& mesh = storage.meshgroup->meshes[mesh_idx];
+            if (!mesh.getSettingBoolean("mold_enabled"))
+            {
+                continue; // only cut original models out of all molds
+            }
             Slicer& slicer = *slicer_list[mesh_idx];
             SlicerLayer& layer = slicer.layers[layer_nr];
             layer.polygons = layer.polygons.difference(all_original_mold_outlines);

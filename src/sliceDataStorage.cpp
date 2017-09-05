@@ -12,6 +12,11 @@ namespace cura
 
 Polygons& SliceLayerPart::getOwnInfillArea()
 {
+    return const_cast<Polygons&>(const_cast<const SliceLayerPart*>(this)->getOwnInfillArea());
+}
+
+const Polygons& SliceLayerPart::getOwnInfillArea() const
+{
     if (infill_area_own)
     {
         return *infill_area_own;
@@ -20,39 +25,6 @@ Polygons& SliceLayerPart::getOwnInfillArea()
     {
         return infill_area;
     }
-}
-
-bool SliceLayerPart::isUsed(const SettingsBaseVirtual& mesh_settings) const
-{
-    if (mesh_settings.getSettingAsCount("wall_line_count") > 0 && insets.size() > 0)
-    { // note that in case wall line count is zero, the outline was pushed onto the insets
-        return true;
-    }
-    if (skin_parts.size() > 0)
-    {
-        return true;
-    }
-    if (mesh_settings.getSettingBoolean("spaghetti_infill_enabled"))
-    {
-        if (spaghetti_infill_volumes.size() > 0)
-        {
-            return true;
-        }
-    }
-    else if (mesh_settings.getSettingInMicrons("infill_line_distance") > 0)
-    {
-        for (const std::vector<Polygons>& infill_area_per_combine : infill_area_per_combine_per_density)
-        {
-            for (const Polygons& area : infill_area_per_combine)
-            {
-                if (area.size() > 0)
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
 }
 
 Polygons SliceLayer::getOutlines(bool external_polys_only) const
@@ -111,6 +83,163 @@ SliceMeshStorage::~SliceMeshStorage()
     {
         delete base_subdiv_cube;
     }
+}
+
+bool SliceMeshStorage::getExtruderIsUsed(int extruder_nr) const
+{
+    if (getSettingBoolean("magic_spiralize"))
+    {
+        if (getSettingAsExtruderNr("wall_0_extruder_nr") == extruder_nr)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    if (getSettingAsCount("wall_line_count") > 0 && getSettingAsExtruderNr("wall_0_extruder_nr") == extruder_nr)
+    {
+        return true;
+    }
+    if ((getSettingAsCount("wall_line_count") > 1 || getSettingBoolean("alternate_extra_perimeter") || getSettingBoolean("fill_perimeter_gaps"))
+        && getSettingAsExtruderNr("wall_x_extruder_nr") == extruder_nr)
+    {
+        return true;
+    }
+    if (getSettingInMicrons("infill_line_distance") > 0 && getSettingAsExtruderNr("infill_extruder_nr") == extruder_nr)
+    {
+        return true;
+    }
+    if ((getSettingAsCount("top_layers") > 0 || getSettingAsCount("bottom_layers") > 0) && getSettingAsExtruderNr("top_bottom_extruder_nr") == extruder_nr)
+    {
+        return true;
+    }
+    if ((getSettingAsCount("top_layers") > 0 || getSettingAsCount("bottom_layers") > 0) && getSettingAsCount("roofing_layer_count") > 0 && getSettingAsExtruderNr("roofing_extruder_nr") == extruder_nr)
+    {
+        return true;
+    }
+    return false;
+}
+
+bool SliceMeshStorage::getExtruderIsUsed(int extruder_nr, int layer_nr) const
+{
+    if (layer_nr < 0 || layer_nr >= static_cast<int>(layers.size()))
+    {
+        return false;
+    }
+    if (getSettingBoolean("anti_overhang_mesh")
+        || getSettingBoolean("support_mesh"))
+    { // object is not printed as object, but as support.
+        return false;
+    }
+    const SliceLayer& layer = layers[layer_nr];
+    if (getSettingAsExtruderNr("wall_0_extruder_nr") == extruder_nr && (getSettingAsCount("wall_line_count") > 0 || getSettingAsCount("skin_outline_count") > 0))
+    {
+        for (const SliceLayerPart& part : layer.parts)
+        {
+            if (part.insets.size() > 0 && part.insets[0].size() > 0)
+            {
+                return true;
+            }
+            for (const SkinPart& skin_part : part.skin_parts)
+            {
+                if (!skin_part.insets.empty())
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    if (getSettingAsFillPerimeterGapMode("fill_perimeter_gaps") != FillPerimeterGapMode::NOWHERE
+        && (getSettingAsCount("wall_line_count") > 0 || getSettingAsCount("skin_outline_count") > 0)
+        && getSettingAsExtruderNr("wall_0_extruder_nr") == extruder_nr)
+    {
+        for (const SliceLayerPart& part : layer.parts)
+        {
+            if (part.perimeter_gaps.size() > 0)
+            {
+                return true;
+            }
+            for (const SkinPart& skin_part : part.skin_parts)
+            {
+                if (skin_part.perimeter_gaps.size() > 0)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    if (getSettingBoolean("fill_outline_gaps")
+        && getSettingAsCount("wall_line_count") > 0
+        && getSettingAsExtruderNr("wall_0_extruder_nr") == extruder_nr)
+    {
+        for (const SliceLayerPart& part : layer.parts)
+        {
+            if (part.outline_gaps.size() > 0)
+            {
+                return true;
+            }
+        }
+    }
+    if ((getSettingAsCount("wall_line_count") > 1 || getSettingBoolean("alternate_extra_perimeter")) && getSettingAsExtruderNr("wall_x_extruder_nr") == extruder_nr)
+    {
+        for (const SliceLayerPart& part : layer.parts)
+        {
+            if (part.insets.size() > 1 && part.insets[1].size() > 0)
+            {
+                return true;
+            }
+        }
+    }
+    if (getSettingInMicrons("infill_line_distance") > 0 && getSettingAsExtruderNr("infill_extruder_nr") == extruder_nr)
+    {
+        for (const SliceLayerPart& part : layer.parts)
+        {
+            if (part.getOwnInfillArea().size() > 0)
+            {
+                return true;
+            }
+        }
+    }
+    if (getSettingAsExtruderNr("top_bottom_extruder_nr") == extruder_nr)
+    {
+        for (const SliceLayerPart& part : layer.parts)
+        {
+            for (const SkinPart& skin_part : part.skin_parts)
+            {
+                if (!skin_part.inner_infill.empty())
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    if (getSettingAsExtruderNr("roofing_extruder_nr") == extruder_nr)
+    {
+        for (const SliceLayerPart& part : layer.parts)
+        {
+            for (const SkinPart& skin_part : part.skin_parts)
+            {
+                if (!skin_part.roofing_fill.empty())
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+Point SliceMeshStorage::getZSeamHint() const
+{
+    Point pos(getSettingInMicrons("z_seam_x"), getSettingInMicrons("z_seam_y"));
+    if (getSettingBoolean("z_seam_relative"))
+    {
+        Point3 middle = bounding_box.getMiddle();
+        pos += Point(middle.x, middle.y);
+    }
+    return pos;
 }
 
 std::vector<RetractionConfig> SliceDataStorage::initializeRetractionConfigs()
@@ -177,11 +306,15 @@ Polygons SliceDataStorage::getLayerOutlines(int layer_nr, bool include_helper_pa
         }
         if (include_helper_parts)
         {
+            const SupportLayer& support_layer = support.supportLayers[std::max(0, layer_nr)];
             if (support.generated) 
             {
-                total.add(support.supportLayers[std::max(0, layer_nr)].supportAreas);
-                total.add(support.supportLayers[std::max(0, layer_nr)].support_bottom);
-                total.add(support.supportLayers[std::max(0, layer_nr)].support_roof);
+                for (const SupportInfillPart& support_infill_part : support_layer.support_infill_parts)
+                {
+                    total.add(support_infill_part.outline);
+                }
+                total.add(support_layer.support_bottom);
+                total.add(support_layer.support_roof);
             }
             if (primeTower.enabled)
             {
@@ -224,7 +357,11 @@ Polygons SliceDataStorage::getLayerSecondOrInnermostWalls(int layer_nr, bool inc
         {
             if (support.generated) 
             {
-                total.add(support.supportLayers[std::max(0, layer_nr)].supportAreas);
+                const SupportLayer& support_layer = support.supportLayers[std::max(0, layer_nr)];
+                for (const SupportInfillPart& support_infill_part : support_layer.support_infill_parts)
+                {
+                    total.add(support_infill_part.outline);
+                }
                 total.add(support.supportLayers[std::max(0, layer_nr)].support_bottom);
                 total.add(support.supportLayers[std::max(0, layer_nr)].support_roof);
             }
@@ -283,11 +420,9 @@ std::vector<bool> SliceDataStorage::getExtrudersUsed() const
     // all meshes are presupposed to actually have content
     for (const SliceMeshStorage& mesh : meshes)
     {
-        if (!mesh.getSettingBoolean("anti_overhang_mesh")
-            && !mesh.getSettingBoolean("support_mesh")
-        )
+        for (unsigned int extruder_nr = 0; extruder_nr < ret.size(); extruder_nr++)
         {
-            ret[mesh.getSettingAsIndex("extruder_nr")] = true;
+            ret[extruder_nr] = ret[extruder_nr] || mesh.getExtruderIsUsed(extruder_nr);
         }
     }
     return ret;
@@ -320,7 +455,7 @@ std::vector<bool> SliceDataStorage::getExtrudersUsed(int layer_nr) const
         // i.e. layers < 0 are for raft, layer 0 is for brim/skirt
         include_adhesion = false;
     }
-    if (include_adhesion)
+    if (include_adhesion && getSettingAsPlatformAdhesion("adhesion_type") != EPlatformAdhesion::NONE)
     {
         ret[getSettingAsIndex("adhesion_extruder_nr")] = true;
         { // process brim/skirt
@@ -345,14 +480,14 @@ std::vector<bool> SliceDataStorage::getExtrudersUsed(int layer_nr) const
             const SupportLayer& support_layer = support.supportLayers[layer_nr];
             if (layer_nr == 0)
             {
-                if (!support_layer.supportAreas.empty())
+                if (!support_layer.support_infill_parts.empty())
                 {
                     ret[getSettingAsIndex("support_extruder_nr_layer_0")] = true;
                 }
             }
             else
             {
-                if (!support_layer.supportAreas.empty())
+                if (!support_layer.support_infill_parts.empty())
                 {
                     ret[getSettingAsIndex("support_infill_extruder_nr")] = true;
                 }
@@ -372,18 +507,9 @@ std::vector<bool> SliceDataStorage::getExtrudersUsed(int layer_nr) const
     {
         for (const SliceMeshStorage& mesh : meshes)
         {
-            if (layer_nr >= int(mesh.layers.size()))
+            for (unsigned int extruder_nr = 0; extruder_nr < ret.size(); extruder_nr++)
             {
-                continue;
-            }
-            const SliceLayer& layer = mesh.layers[layer_nr];
-            for (const SliceLayerPart& part : layer.parts)
-            {
-                if (part.isUsed(mesh))
-                {
-                    ret[mesh.getSettingAsIndex("extruder_nr")] = true;
-                    break;
-                }
+                ret[extruder_nr] = ret[extruder_nr] || mesh.getExtruderIsUsed(extruder_nr, layer_nr);
             }
         }
     }
@@ -399,6 +525,60 @@ bool SliceDataStorage::getExtruderPrimeBlobEnabled(int extruder_nr) const
 
     const ExtruderTrain *train = meshgroup->getExtruderTrain(extruder_nr);
     return train->getSettingBoolean("prime_blob_enable");
+}
+
+
+void SupportLayer::excludeAreasFromSupportInfillAreas(const Polygons& exclude_polygons, const AABB& exclude_polygons_boundary_box)
+{
+    // record the indexes that need to be removed and do that after
+    std::list<size_t> to_remove_part_indices;  // LIFO for removing
+
+    unsigned int part_count_to_check = this->support_infill_parts.size(); // note that support_infill_parts.size() changes during the computation below
+    for (size_t part_idx = 0; part_idx < part_count_to_check; ++part_idx)
+    {
+        SupportInfillPart& support_infill_part = this->support_infill_parts[part_idx];
+
+        // if the areas don't overlap, do nothing
+        if (!exclude_polygons_boundary_box.hit(support_infill_part.outline_boundary_box))
+        {
+            continue;
+        }
+
+        Polygons result_polygons = support_infill_part.outline.difference(exclude_polygons);
+
+        // if no smaller parts get generated, this mean this part should be removed.
+        if (result_polygons.empty())
+        {
+            to_remove_part_indices.push_back(part_idx);
+            continue;
+        }
+
+        std::vector<PolygonsPart> smaller_support_islands = result_polygons.splitIntoParts();
+
+        // there are one or more smaller parts.
+        // we first replace the current part with one of the smaller parts,
+        // the rest we add to the support_infill_parts (but after part_count_to_check)
+        support_infill_part.outline = smaller_support_islands[0];
+
+        for (size_t support_island_idx = 1; support_island_idx < smaller_support_islands.size(); ++support_island_idx)
+        {
+            const PolygonsPart& smaller_island = smaller_support_islands[support_island_idx];
+            this->support_infill_parts.emplace_back(smaller_island, support_infill_part.support_line_width, support_infill_part.inset_count_to_generate);
+        }
+    }
+
+    // remove the ones that need to be removed (LIFO)
+    while (!to_remove_part_indices.empty())
+    {
+        const size_t remove_idx = to_remove_part_indices.back();
+        to_remove_part_indices.pop_back();
+
+        if (remove_idx < this->support_infill_parts.size() - 1)
+        { // move last element to the to-be-removed element so that we can erase the last place in the vector
+            this->support_infill_parts[remove_idx] = std::move(this->support_infill_parts.back());
+        }
+        this->support_infill_parts.pop_back(); // always erase last place in the vector
+    }
 }
 
 } // namespace cura

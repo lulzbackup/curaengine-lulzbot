@@ -82,10 +82,12 @@ set(engine_SRCS # Except main.cpp.
     src/raft.cpp
     src/skin.cpp
     src/SkirtBrim.cpp
+    src/SupportInfillPart.cpp
     src/sliceDataStorage.cpp
     src/slicer.cpp
     src/support.cpp
     src/timeEstimate.cpp
+    src/TopSurface.cpp
     src/WallsComputation.cpp
     src/wallOverlap.cpp
     src/Weaver.cpp
@@ -122,6 +124,7 @@ set(engine_SRCS # Except main.cpp.
     src/utils/LinearAlg2D.cpp
     src/utils/ListPolyIt.cpp
     src/utils/logoutput.cpp
+    src/utils/PolygonsPointIndex.cpp
     src/utils/PolygonProximityLinker.cpp
     src/utils/polygonUtils.cpp
     src/utils/polygon.cpp
