@@ -55,6 +55,17 @@ bool ConstPolygonRef::_inside(Point p, bool border_result) const
     return (crossings % 2) == 1;
 }
 
+
+Polygons ConstPolygonRef::intersection(const ConstPolygonRef& other) const
+{
+    Polygons ret;
+    ClipperLib::Clipper clipper(clipper_init);
+    clipper.AddPath(*path, ClipperLib::ptSubject, true);
+    clipper.AddPath(*other.path, ClipperLib::ptClip, true);
+    clipper.Execute(ClipperLib::ctIntersection, ret.paths);
+    return ret;
+}
+
 bool Polygons::empty() const
 {
     return paths.empty();
@@ -197,6 +208,18 @@ unsigned int Polygons::findInside(Point p, bool border_result)
     return ret;
 }
 
+Polygons Polygons::intersectionPolyLines(const Polygons& polylines) const
+{
+    ClipperLib::PolyTree result;
+    ClipperLib::Clipper clipper(clipper_init);
+    clipper.AddPaths(polylines.paths, ClipperLib::ptSubject, false);
+    clipper.AddPaths(paths, ClipperLib::ptClip, true);
+    clipper.Execute(ClipperLib::ctIntersection, result);
+    Polygons ret;
+    ret.addPolyTreeNodeRecursive(result);
+    return ret;
+}
+
 coord_t Polygons::polyLineLength() const
 {
     coord_t length = 0;
@@ -215,6 +238,10 @@ coord_t Polygons::polyLineLength() const
 
 Polygons Polygons::offset(int distance, ClipperLib::JoinType join_type, double miter_limit) const
 {
+    if (distance == 0)
+    {
+        return *this;
+    }
     Polygons ret;
     ClipperLib::ClipperOffset clipper(miter_limit, 10.0);
     clipper.AddPaths(unionPolygons().paths, join_type, ClipperLib::etClosedPolygon);
@@ -225,6 +252,12 @@ Polygons Polygons::offset(int distance, ClipperLib::JoinType join_type, double m
 
 Polygons ConstPolygonRef::offset(int distance, ClipperLib::JoinType join_type, double miter_limit) const
 {
+    if (distance == 0)
+    {
+        Polygons ret;
+        ret.add(*this);
+        return ret;
+    }
     Polygons ret;
     ClipperLib::ClipperOffset clipper(miter_limit, 10.0);
     clipper.AddPath(*path, join_type, ClipperLib::etClosedPolygon);
@@ -478,6 +511,21 @@ void PolygonRef::simplify(int smallest_line_segment_squared, int allowed_error_d
     ListPolyIt::convertListPolygonToPolygon(result_list_poly, *this);
 }
 
+void PolygonRef::applyMatrix(const PointMatrix& matrix)
+{
+    for (unsigned int path_idx = 0; path_idx < path->size(); path_idx++)
+    {
+        (*path)[path_idx] = matrix.apply((*path)[path_idx]);
+    }
+}
+void PolygonRef::applyMatrix(const Point3Matrix& matrix)
+{
+    for (unsigned int path_idx = 0; path_idx < path->size(); path_idx++)
+    {
+        (*path)[path_idx] = matrix.apply((*path)[path_idx]);
+    }
+}
+
 Polygons Polygons::getOutsidePolygons() const
 {
     Polygons ret;
@@ -541,6 +589,25 @@ void Polygons::removeEmptyHoles_processPolyTreeNode(const ClipperLib::PolyNode& 
                 removeEmptyHoles_processPolyTreeNode(hole_node, remove_holes, ret);
             }
         }
+    }
+}
+
+
+Polygons Polygons::toPolygons(ClipperLib::PolyTree& poly_tree)
+{
+    Polygons ret;
+    ret.addPolyTreeNodeRecursive(poly_tree);
+    return ret;
+}
+
+
+void Polygons::addPolyTreeNodeRecursive(const ClipperLib::PolyNode& node)
+{
+    for (int outer_poly_idx = 0; outer_poly_idx < node.ChildCount(); outer_poly_idx++)
+    {
+        ClipperLib::PolyNode* child = node.Childs[outer_poly_idx];
+        this->paths.push_back(child->Contour);
+        addPolyTreeNodeRecursive(*child);
     }
 }
 
@@ -1140,13 +1207,13 @@ Polygons Polygons::smooth2(int remove_length, int min_area) const
     return ret;
 }
 
-double PolygonsPart::area() const
+double Polygons::area() const
 {
-    double area = 0;
+    double area = 0.0;
     for (unsigned int poly_idx = 0; poly_idx < size(); poly_idx++)
     {
         area += operator[](poly_idx).area();
-        // note: holes have negative area
+        // note: holes already have negative area
     }
     return area;
 }

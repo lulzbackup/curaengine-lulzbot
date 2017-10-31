@@ -1,4 +1,4 @@
-/** Copyright (C) 2013 David Braam - Released under terms of the AGPLv3 License */
+/** Copyright (C) 2013 Ultimaker - Released under terms of the AGPLv3 License */
 #include "infill.h"
 #include "functional"
 #include "utils/polygonUtils.h"
@@ -9,8 +9,18 @@
 #define OCTDLEN(x) ((21600*(x))/30547)
 
 namespace cura {
+/*!
+ * Function which returns the scanline_idx for a given x coordinate
+ *
+ * For negative \p x this is different from simple division.
+ *
+ * \warning \p line_width is assumed to be positive
+ *
+ * \param x the point to get the scansegment index for
+ * \param line_width the width of the scan segments
+ */
 
-int Infill::computeScanSegmentIdx(int x, int line_width)
+static inline int computeScanSegmentIdx(int x, int line_width)
 {
     if (x < 0)
     {
@@ -21,11 +31,12 @@ int Infill::computeScanSegmentIdx(int x, int line_width)
     return x / line_width;
 }
 
-void Infill::generate(Polygons& result_polygons, Polygons& result_lines, const SliceMeshStorage* mesh)
+namespace cura {
+
+void Infill::generate(Polygons& result_polygons, Polygons& result_lines, const SpaceFillingTreeFill* cross_fill_pattern, const SliceMeshStorage* mesh)
 {
     if (in_outline.size() == 0) return;
     if (line_distance == 0) return;
-    Polygons outline_offsetted;
     switch(pattern)
     {
     case EFillMethod::GRID:
@@ -40,6 +51,9 @@ void Infill::generate(Polygons& result_polygons, Polygons& result_lines, const S
     case EFillMethod::TETRAHEDRAL:
         generateTetrahedralInfill(result_lines);
         break;
+    case EFillMethod::QUARTER_CUBIC:
+        generateQuarterCubicInfill(result_lines);
+        break;
     case EFillMethod::TRIANGLES:
         generateTriangleInfill(result_lines);
         break;
@@ -50,7 +64,7 @@ void Infill::generate(Polygons& result_polygons, Polygons& result_lines, const S
         generateConcentric3DInfill(result_polygons);
         break;
     case EFillMethod::ZIG_ZAG:
-        generateZigZagInfill(result_lines, line_distance, fill_angle, connected_zigzags, use_endpieces);
+        generateZigZagInfill(result_lines, line_distance, fill_angle);
         break;
     case EFillMethod::TRUNCATED_OCTAHEDRON:
         generateTroctInfill(result_polygons, fill_angle);
@@ -62,6 +76,15 @@ void Infill::generate(Polygons& result_polygons, Polygons& result_lines, const S
             break;
         }
         generateCubicSubDivInfill(result_lines, *mesh);
+        break;
+    case EFillMethod::CROSS:
+    case EFillMethod::CROSS_3D:
+        if (!cross_fill_pattern)
+        {
+            logError("Cannot generate Cross infill without a pregenerated cross fill pattern!\n");
+            break;
+        }
+        generateCrossInfill(*cross_fill_pattern, result_polygons, result_lines);
         break;
     default:
         logError("Fill pattern has unknown value.\n");
@@ -215,8 +238,8 @@ void Infill::generateConcentricInfill(Polygons& first_concentric_wall, Polygons&
 
 void Infill::generateConcentric3DInfill(Polygons& result)
 {
-    int period = line_distance * 2;
-    int shift = int64_t(one_over_sqrt_2 * z) % period;
+    coord_t period = line_distance * 2;
+    coord_t shift = int64_t(one_over_sqrt_2 * z) % period;
     shift = std::min(shift, period - shift); // symmetry due to the fact that we are applying the shift in both directions
     shift = std::min(shift, period / 2 - infill_line_width / 2); // don't put lines too close to each other
     shift = std::max(shift, infill_line_width / 2); // don't put lines too close to each other
@@ -244,15 +267,25 @@ void Infill::generateCubicInfill(Polygons& result)
 
 void Infill::generateTetrahedralInfill(Polygons& result)
 {
-    int period = line_distance * 2;
-    int shift = int64_t(one_over_sqrt_2 * z) % period;
+    generateHalfTetrahedralInfill(0.0, 0, result);
+    generateHalfTetrahedralInfill(0.0, 90, result);
+}
+
+void Infill::generateQuarterCubicInfill(Polygons& result)
+{
+    generateHalfTetrahedralInfill(0.0, 0, result);
+    generateHalfTetrahedralInfill(0.5, 90, result);
+}
+
+void Infill::generateHalfTetrahedralInfill(float pattern_z_shift, int angle_shift, Polygons& result)
+{
+    coord_t period = line_distance * 2;
+    coord_t shift = int64_t(one_over_sqrt_2 * (z + pattern_z_shift * period * 2)) % period;
     shift = std::min(shift, period - shift); // symmetry due to the fact that we are applying the shift in both directions
     shift = std::min(shift, period / 2 - infill_line_width / 2); // don't put lines too close to each other
     shift = std::max(shift, infill_line_width / 2); // don't put lines too close to each other
-    generateLineInfill(result, period, fill_angle, shift);
-    generateLineInfill(result, period, fill_angle, -shift);
-    generateLineInfill(result, period, fill_angle + 90, shift);
-    generateLineInfill(result, period, fill_angle + 90, -shift);
+    generateLineInfill(result, period, fill_angle + angle_shift, shift);
+    generateLineInfill(result, period, fill_angle + angle_shift, -shift);
 }
 
 void Infill::generateTriangleInfill(Polygons& result)
@@ -267,6 +300,30 @@ void Infill::generateCubicSubDivInfill(Polygons& result, const SliceMeshStorage&
     Polygons uncropped;
     mesh.base_subdiv_cube->generateSubdivisionLines(z, uncropped);
     addLineSegmentsInfill(result, uncropped);
+}
+
+void Infill::generateCrossInfill(const SpaceFillingTreeFill& cross_fill_pattern, Polygons& result_polygons, Polygons& result_lines)
+{
+    if (zig_zaggify)
+    {
+        outline_offset += -infill_line_width / 2;
+    }
+    coord_t shift = line_distance / 2;
+    bool use_odd_in_junctions = false;
+    bool use_odd_out_junctions = false;
+    if (pattern == EFillMethod::CROSS_3D)
+    {
+        coord_t period = line_distance * 2;
+        shift = z % period;
+        shift = std::min(shift, period - shift); // symmetry due to the fact that we are applying the shift in both directions
+        shift = std::min(shift, period / 2 - infill_line_width / 2); // don't put lines too close to each other
+        shift = std::max(shift, infill_line_width / 2); // don't put lines too close to each other
+
+        use_odd_in_junctions = ((z + period / 2) / period) % 2 == 1; // change junction halfway in between each period when the in-junctions occur
+        use_odd_out_junctions = (z / period) % 2 == 1; // out junctions occur halfway at each periods
+    }
+    Polygons outline = in_outline.offset(outline_offset);
+    cross_fill_pattern.generate(outline, shift, zig_zaggify, fill_angle, apply_pockets_alternatingly, use_odd_in_junctions, use_odd_out_junctions, pocket_size, result_polygons, result_lines);
 }
 
 void Infill::addLineSegmentsInfill(Polygons& result, Polygons& input)
@@ -296,9 +353,13 @@ void Infill::addLineInfill(Polygons& result, const PointMatrix& rotation_matrix,
         return 0;
     };
 
-    int scanline_idx = 0;
+    unsigned int scanline_idx = 0;
     for(int64_t x = scanline_min_idx * line_distance + shift; x < boundary.max.X; x += line_distance)
     {
+        if (scanline_idx >= cut_list.size())
+        {
+            break;
+        }
         std::vector<int64_t>& crossings = cut_list[scanline_idx];
         qsort(crossings.data(), crossings.size(), sizeof(int64_t), compare_int64_t);
         for(unsigned int crossing_idx = 0; crossing_idx + 1 < crossings.size(); crossing_idx += 2)
@@ -322,28 +383,11 @@ void Infill::generateLineInfill(Polygons& result, int line_distance, const doubl
 }
 
 
-void Infill::generateZigZagInfill(Polygons& result, const int line_distance, const double& fill_angle, const bool connected_zigzags, const bool use_endpieces)
+void Infill::generateZigZagInfill(Polygons& result, const int line_distance, const double& fill_angle)
 {
-
     PointMatrix rotation_matrix(fill_angle);
-    if (use_endpieces)
-    {
-        if (connected_zigzags)
-        {
-            ZigzagConnectorProcessorConnectedEndPieces zigzag_processor(rotation_matrix, result);
-            generateLinearBasedInfill(outline_offset - infill_line_width / 2, result, line_distance, rotation_matrix, zigzag_processor, connected_zigzags, 0);
-        }
-        else
-        {
-            ZigzagConnectorProcessorDisconnectedEndPieces zigzag_processor(rotation_matrix, result);
-            generateLinearBasedInfill(outline_offset - infill_line_width / 2, result, line_distance, rotation_matrix, zigzag_processor, connected_zigzags, 0);
-        }
-    }
-    else 
-    {
-        ZigzagConnectorProcessorNoEndPieces zigzag_processor(rotation_matrix, result);
-        generateLinearBasedInfill(outline_offset - infill_line_width / 2, result, line_distance, rotation_matrix, zigzag_processor, connected_zigzags, 0);
-    }
+    ZigzagConnectorProcessor zigzag_processor(rotation_matrix, result, use_endpieces, connected_zigzags, skip_some_zags, zag_skip_count);
+    generateLinearBasedInfill(outline_offset - infill_line_width / 2, result, line_distance, rotation_matrix, zigzag_processor, connected_zigzags, 0);
 }
 
 /* 
@@ -468,7 +512,7 @@ void Infill::generateLinearBasedInfill(const int outline_offset, Polygons& resul
                 assert(scanline_idx - scanline_min_idx >= 0 && scanline_idx - scanline_min_idx < int(cut_list.size()) && "reading infill cutlist index out of bounds!");
                 cut_list[scanline_idx - scanline_min_idx].push_back(y);
                 Point scanline_linesegment_intersection(x, y);
-                zigzag_connector_processor.registerScanlineSegmentIntersection(scanline_linesegment_intersection, scanline_idx % 2 == 0);
+                zigzag_connector_processor.registerScanlineSegmentIntersection(scanline_linesegment_intersection, scanline_idx);
             }
             zigzag_connector_processor.registerVertex(p1);
             p0 = p1;

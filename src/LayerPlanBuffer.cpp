@@ -1,4 +1,5 @@
-/** Copyright (C) 2015 Ultimaker - Released under terms of the AGPLv3 License */
+//Copyright (c) 2017 Ultimaker B.V.
+//CuraEngine is released under the terms of the AGPLv3 or higher.
 
 #include "LayerPlanBuffer.h"
 #include "gcodeExport.h"
@@ -72,6 +73,7 @@ void LayerPlanBuffer::flush()
         {
             CommandSocket::getInstance()->flushGcode();
         }
+        delete buffer.front();
         buffer.pop_front();
     }
 }
@@ -98,7 +100,9 @@ void LayerPlanBuffer::addConnectingTravelMove(LayerPlan* prev_layer, const Layer
     if (!prev_layer->last_planned_position || *prev_layer->last_planned_position != first_location_new_layer)
     {
         prev_layer->setIsInside(new_layer_destination_state->second);
-        prev_layer->addTravel(first_location_new_layer);
+        const bool force_retract = prev_layer->storage.getSettingBoolean("travel_retract_before_outer_wall")
+            && (prev_layer->storage.getSettingBoolean("outer_inset_first") || prev_layer->storage.getSettingAsCount("wall_line_count") == 1); //Moving towards an outer wall.
+        prev_layer->addTravel(first_location_new_layer, force_retract);
     }
 }
 
@@ -115,7 +119,7 @@ void LayerPlanBuffer::processFanSpeedLayerTime()
         auto prev_layer_it = newest_layer_it;
         prev_layer_it--;
         const LayerPlan* prev_layer = *prev_layer_it;
-        starting_position = prev_layer->getLastPosition();
+        starting_position = prev_layer->getLastPlannedPositionOrStartingPosition();
     }
     LayerPlan* newest_layer = *newest_layer_it;
     newest_layer->processFanSpeedAndMinimalLayerTime(starting_position);
@@ -375,7 +379,7 @@ void LayerPlanBuffer::insertFinalPrintTempCommand(std::vector<ExtruderPlan*>& ex
                 initial_print_temp = prev_extruder_plan.required_start_temperature;
             }
         }
-        assert(time_window != 0.0);
+        assert(time_window != 0.0 && "ExtruderPlans have been added while they weren't needed! Current code cannot handle this situation. SliceDataStorage::getExtrudersUsed should probably be updated!");
         weighted_average_extrusion_temp /= time_window;
         time_window -= heated_pre_travel_time + heated_post_travel_time;
         assert(heated_pre_travel_time != -1 && "heated_pre_travel_time must have been computed; there must have been an extruder plan!");
@@ -454,7 +458,7 @@ void LayerPlanBuffer::insertTempCommands()
         return;
     }
 
-    std::vector<ExtruderPlan*> extruder_plans;
+    std::vector<ExtruderPlan*> extruder_plans; // sorted in print order
     extruder_plans.reserve(buffer.size() * 2);
     for (LayerPlan* layer_plan : buffer)
     {

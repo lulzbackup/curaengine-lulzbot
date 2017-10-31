@@ -29,15 +29,17 @@ std::string toString(EGCodeFlavor flavor)
             return "Makerbot";
         case EGCodeFlavor::ULTIGCODE:
             return "UltiGCode";
-        case EGCodeFlavor::REPRAP_VOLUMATRIC:
-            return "RepRap(Volumetric)";
+        case EGCodeFlavor::MARLIN_VOLUMATRIC:
+            return "Marlin(Volumetric)";
         case EGCodeFlavor::GRIFFIN:
             return "Griffin";
         case EGCodeFlavor::REPETIER:
             return "Repetier";
         case EGCodeFlavor::REPRAP:
-        default:
             return "RepRap";
+        case EGCodeFlavor::MARLIN:
+        default:
+            return "Marlin";
     }
 }
 
@@ -135,6 +137,16 @@ int SettingsBaseVirtual::getSettingAsIndex(std::string key) const
     return atoi(value.c_str());
 }
 
+int SettingsBaseVirtual::getSettingAsExtruderNr(std::string key) const
+{
+    int extruder_nr = getSettingAsIndex(key);
+    if (extruder_nr == -1)
+    {
+        extruder_nr = getSettingAsIndex("extruder_nr");
+    }
+    return extruder_nr;
+}
+
 int SettingsBaseVirtual::getSettingAsCount(std::string key) const
 {
     std::string value = getSettingString(key);
@@ -203,7 +215,7 @@ double SettingsBaseVirtual::getSettingInMillimetersPerSecond(std::string key) co
 double SettingsBaseVirtual::getSettingInCubicMillimeters(std::string key) const
 {
     std::string value = getSettingString(key);
-    return std::max(0.0, atof(value.c_str()));
+    return atof(value.c_str());
 }
 
 double SettingsBaseVirtual::getSettingInPercentage(std::string key) const
@@ -337,11 +349,13 @@ EGCodeFlavor SettingsBaseVirtual::getSettingAsGCodeFlavor(std::string key) const
         return EGCodeFlavor::BFB;
     else if (value == "MACH3")
         return EGCodeFlavor::MACH3;
-    else if (value == "RepRap (Volumatric)")
-        return EGCodeFlavor::REPRAP_VOLUMATRIC;
+    else if (value == "RepRap (Volumetric)")
+        return EGCodeFlavor::MARLIN_VOLUMATRIC;
     else if (value == "Repetier")
         return EGCodeFlavor::REPETIER;
-    return EGCodeFlavor::REPRAP;
+    else if (value == "RepRap (RepRap)")
+        return EGCodeFlavor::REPRAP;
+    return EGCodeFlavor::MARLIN;
 }
 
 EFillMethod SettingsBaseVirtual::getSettingAsFillMethod(std::string key) const
@@ -357,6 +371,8 @@ EFillMethod SettingsBaseVirtual::getSettingAsFillMethod(std::string key) const
         return EFillMethod::CUBICSUBDIV;
     if (value == "tetrahedral")
         return EFillMethod::TETRAHEDRAL;
+    if (value == "quarter_cubic")
+        return EFillMethod::QUARTER_CUBIC;
     if (value == "triangles")
         return EFillMethod::TRIANGLES;
     if (value == "concentric")
@@ -367,6 +383,10 @@ EFillMethod SettingsBaseVirtual::getSettingAsFillMethod(std::string key) const
         return EFillMethod::ZIG_ZAG;
     if (value == "truncated_octahedron")
         return EFillMethod::TRUNCATED_OCTAHEDRON;
+    if (value == "cross")
+        return EFillMethod::CROSS;
+    if (value == "cross_3d")
+        return EFillMethod::CROSS_3D;
     return EFillMethod::NONE;
 }
 
@@ -401,7 +421,23 @@ EZSeamType SettingsBaseVirtual::getSettingAsZSeamType(std::string key) const
         return EZSeamType::SHORTEST;
     if (value == "back")
         return EZSeamType::USER_SPECIFIED;
+    if (value == "sharpest_corner")
+        return EZSeamType::SHARPEST_CORNER;
     return EZSeamType::SHORTEST;
+}
+
+EZSeamCornerPrefType SettingsBaseVirtual::getSettingAsZSeamCornerPrefType(std::string key) const
+{
+    std::string value = getSettingString(key);
+    if (value == "z_seam_corner_none")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_NONE;
+    if (value == "z_seam_corner_inner")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_INNER;
+    if (value == "z_seam_corner_outer")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_OUTER;
+    if (value == "z_seam_corner_any")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_ANY;
+    return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_NONE;
 }
 
 ESurfaceMode SettingsBaseVirtual::getSettingAsSurfaceMode(std::string key) const

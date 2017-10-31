@@ -130,7 +130,7 @@ Point PolygonUtils::moveInsideDiagonally(ClosestPolygonPoint point_on_boundary, 
     {
         return no_point;
     }
-    ConstPolygonRef poly = *point_on_boundary.poly;
+    ConstPolygonRef poly = **point_on_boundary.poly;
     Point p0 = poly[point_on_boundary.point_idx];
     Point p1 = poly[(point_on_boundary.point_idx + 1) % poly.size()];
     if (vSize2(p0 - point_on_boundary.location) < vSize2(p1 - point_on_boundary.location))
@@ -414,6 +414,7 @@ ClosestPolygonPoint PolygonUtils::ensureInsideOrOutside(const Polygons& polygons
         return closest_polygon_point;
     }
     // if above fails, we perform an offset and sit directly on the offsetted polygon (and keep the result from the above moveInside)
+    // The offset is performed on the closest reference polygon in order to save computation time
     else
     {
         int offset = (is_outside_boundary)? -preferred_dist_inside : preferred_dist_inside; // perform inset on outer boundary and outset on holes
@@ -425,48 +426,58 @@ ClosestPolygonPoint PolygonUtils::ensureInsideOrOutside(const Polygons& polygons
         ClosestPolygonPoint inside = findClosest(from, insetted, penalty_function);
         if (inside.isValid())
         {
-            bool is_inside = polygons.inside(inside.location) == is_outside_boundary; // inside a hole is outside the part
+            bool is_inside = polygons.inside(inside.location);
             if (is_inside != (preferred_dist_inside > 0))
             {
-                /*
-                 * somehow the insetted polygon is not inside of [closest_poly]
-                 * Clipper seems to fuck up sometimes.
-                 */
+                // Insetting from the reference polygon ended up outside another polygon.
+                // Perform an offset on all polygons instead.
+                Polygons all_insetted = polygons.offset(-preferred_dist_inside);
+                ClosestPolygonPoint overall_inside = findClosest(from, all_insetted, penalty_function);
 #ifdef DEBUG
-                try
+                bool overall_is_inside = polygons.inside(overall_inside.location);
+                if (overall_is_inside != (preferred_dist_inside > 0))
                 {
-                    int offset_performed = offset / 2;
-                    AABB aabb(insetted);
-                    aabb.expand(std::abs(preferred_dist_inside) * 2);
-                    SVG svg("debug.html", aabb);
-                    svg.writeComment("Original polygon in black");
-                    svg.writePolygon(closest_poly, SVG::Color::BLACK);
-                    for (auto point : closest_poly)
+                    try
                     {
-                        svg.writePoint(point, true, 2);
-                    }
-                    std::stringstream ss;
-                    ss << "Offsetted polygon in blue with offset " << offset_performed;
-                    svg.writeComment(ss.str());
-                    svg.writePolygons(insetted, SVG::Color::BLUE);
-                    for (auto poly : insetted)
-                    {
-                        for (auto point : poly)
+                        int offset_performed = offset / 2;
+                        AABB aabb(polygons);
+                        aabb.expand(std::abs(preferred_dist_inside) * 2);
+                        SVG svg("debug.html", aabb);
+                        svg.writeComment("Original polygon in black");
+                        svg.writePolygons(polygons, SVG::Color::BLACK);
+                        for (auto poly : polygons)
                         {
-                            svg.writePoint(point, true, 2);
+                            for (auto point : poly)
+                            {
+                                svg.writePoint(point, true, 2);
+                            }
                         }
+                        std::stringstream ss;
+                        svg.writeComment("Reference polygon in yellow");
+                        svg.writePolygon(closest_poly, SVG::Color::YELLOW);
+                        ss << "Offsetted polygon in blue with offset " << offset_performed;
+                        svg.writeComment(ss.str());
+                        svg.writePolygons(insetted, SVG::Color::BLUE);
+                        for (auto poly : insetted)
+                        {
+                            for (auto point : poly)
+                            {
+                                svg.writePoint(point, true, 2);
+                            }
+                        }
+                        svg.writeComment("From location");
+                        svg.writePoint(from, true, 5, SVG::Color::GREEN);
+                        svg.writeComment("Location computed to be inside the black polygon");
+                        svg.writePoint(inside.location, true, 5, SVG::Color::RED);
                     }
-                    svg.writeComment("From location");
-                    svg.writePoint(from, true, 5, SVG::Color::GREEN);
-                    svg.writeComment("Location computed to be inside the black polygon");
-                    svg.writePoint(inside.location, true, 5, SVG::Color::RED);
+                    catch(...)
+                    {
+                    }
+                    logError("Clipper::offset failed. See generated debug.html!\n\tBlack is original\n\tBlue is offsetted polygon\n");
+                    return ClosestPolygonPoint();
                 }
-                catch(...)
-                {
-                }
-                logError("Clipper::offset failed. See generated debug.html!\n\tBlack is original\n\tBlue is offsetted polygon\n");
 #endif
-                return ClosestPolygonPoint();
+                inside = overall_inside;
             }
             from = inside.location;
         } // otherwise we just return the closest polygon point without modifying the from location
@@ -600,7 +611,7 @@ ClosestPolygonPoint PolygonUtils::findClosest(Point from, const Polygons& polygo
     {
         return none;
     }
-    ConstPolygonRef any_polygon = polygons[0];
+    ConstPolygonPointer any_polygon = polygons[0];
     unsigned int any_poly_idx;
     for (any_poly_idx = 0; any_poly_idx < polygons.size(); any_poly_idx++)
     { // find first point in all polygons
@@ -610,11 +621,11 @@ ClosestPolygonPoint PolygonUtils::findClosest(Point from, const Polygons& polygo
             break;
         }
     }
-    if (any_polygon.size() == 0)
+    if (any_polygon->size() == 0)
     {
         return none;
     }
-    ClosestPolygonPoint best(any_polygon[0], 0, any_polygon, any_poly_idx);
+    ClosestPolygonPoint best((*any_polygon)[0], 0, *any_polygon, any_poly_idx);
 
     int64_t closestDist2_score = vSize2(from - best.location) + penalty_function(best.location);
     
@@ -984,5 +995,55 @@ bool PolygonUtils::polygonCollidesWithLineSegment(const Polygons& polys, const P
     return polygonCollidesWithLineSegment(polys, transformed_startPoint, transformed_endPoint, transformation_matrix);
 }
 
+bool PolygonUtils::polygonsIntersect(const ConstPolygonRef& poly_a, const ConstPolygonRef& poly_b)
+{
+    // only do the full intersection when the polys' BBs overlap
+    AABB bba(poly_a);
+    AABB bbb(poly_b);
+    return bba.hit(bbb) && poly_a.intersection(poly_b).size() > 0;
+}
+
+bool PolygonUtils::polygonOutlinesAdjacent(const ConstPolygonRef inner_poly, const ConstPolygonRef outer_poly, const coord_t max_gap)
+{
+    //Heuristic check if their AABBs are near first.
+    AABB inner_aabb(inner_poly);
+    AABB outer_aabb(outer_poly);
+    inner_aabb.max += Point(max_gap, max_gap); //Expand one of them by way of a "distance" by checking intersection with the expanded rectangle.
+    inner_aabb.min -= Point(max_gap, max_gap);
+    if (!inner_aabb.hit(outer_aabb))
+    {
+        return false;
+    }
+
+    //Heuristic says they are near. Now check for real.
+    const coord_t max_gap2 = max_gap * max_gap;
+    const unsigned outer_poly_size = outer_poly.size();
+    for (unsigned line_index = 0; line_index < outer_poly_size; ++line_index)
+    {
+        const Point lp0 = outer_poly[line_index];
+        const Point lp1 = outer_poly[(line_index + 1) % outer_poly_size];
+        for (Point inner_poly_point : inner_poly)
+        {
+            if (LinearAlg2D::getDist2FromLineSegment(lp0, inner_poly_point, lp1) < max_gap2)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void PolygonUtils::findAdjacentPolygons(std::vector<unsigned>& adjacent_poly_indices, const ConstPolygonRef& poly, const std::vector<ConstPolygonPointer>& possible_adjacent_polys, const coord_t max_gap)
+{
+    // given a polygon, and a vector of polygons, return a vector containing the indices of the polygons that are adjacent to the given polygon
+    for (unsigned poly_idx = 0; poly_idx < possible_adjacent_polys.size(); ++poly_idx)
+    {
+        if (polygonOutlinesAdjacent(poly, *possible_adjacent_polys[poly_idx], max_gap) ||
+            polygonOutlinesAdjacent(*possible_adjacent_polys[poly_idx], poly, max_gap))
+        {
+            adjacent_poly_indices.push_back(poly_idx);
+        }
+    }
+}
 
 }//namespace cura
