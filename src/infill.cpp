@@ -8,7 +8,6 @@
 #define OCTSLEN(x) ((43200*(x))/73747)
 #define OCTDLEN(x) ((21600*(x))/30547)
 
-namespace cura {
 /*!
  * Function which returns the scanline_idx for a given x coordinate
  *
