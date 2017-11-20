@@ -114,6 +114,7 @@ enum class EFillMethod
     TETRAHEDRAL,
     QUARTER_CUBIC,
     TRIANGLES,
+    TRIHEXAGON,
     CONCENTRIC,
     CONCENTRIC_3D,
     ZIG_ZAG,
@@ -195,6 +196,13 @@ enum class SupportDistPriority
     Z_OVERRIDES_XY
 };
 
+enum class SlicingTolerance
+{
+    MIDDLE,
+    INCLUSIVE,
+    EXCLUSIVE
+};
+
 #define MAX_EXTRUDERS 16
 
 //Maximum number of infill layers that can be combined into a single infill extrusion area.
@@ -212,7 +220,7 @@ class SettingsBaseVirtual
 protected:
     SettingsBaseVirtual* parent;
 public:
-    virtual std::string getSettingString(std::string key) const = 0;
+    virtual const std::string& getSettingString(const std::string& key) const = 0;
     
     virtual void setSetting(std::string key, std::string value) = 0;
 
@@ -278,6 +286,7 @@ public:
     FillPerimeterGapMode getSettingAsFillPerimeterGapMode(std::string key) const;
     CombingMode getSettingAsCombingMode(std::string key) const;
     SupportDistPriority getSettingAsSupportDistPriority(std::string key) const;
+    SlicingTolerance getSettingAsSlicingTolerance(std::string key) const;
     std::vector<int> getSettingAsIntegerList(std::string key) const;
 };
 
@@ -310,7 +319,7 @@ public:
      */
     void setSetting(std::string key, std::string value);
     void setSettingInheritBase(std::string key, const SettingsBaseVirtual& parent); //!< See \ref SettingsBaseVirtual::setSettingInheritBase
-    std::string getSettingString(std::string key) const; //!< Get a setting from this SettingsBase (or any ancestral SettingsBase)
+    const std::string& getSettingString(const std::string& key) const; //!< Get a setting from this SettingsBase (or any ancestral SettingsBase)
     
     std::string getAllLocalSettingsString() const
     {
@@ -351,7 +360,7 @@ public:
     
     void setSetting(std::string key, std::string value); //!< Set a setting of the parent SettingsBase to a given value
     void setSettingInheritBase(std::string key, const SettingsBaseVirtual& parent); //!< See \ref SettingsBaseVirtual::setSettingInheritBase
-    std::string getSettingString(std::string key) const; //!< Get a setting from the parent SettingsBase (or any further ancestral SettingsBase)
+    const std::string& getSettingString(const std::string& key) const; //!< Get a setting from the parent SettingsBase (or any further ancestral SettingsBase)
 };
 
 
