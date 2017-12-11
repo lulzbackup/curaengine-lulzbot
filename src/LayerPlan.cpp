@@ -741,6 +741,7 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
     {
         bool wait = false;
         gcode.writeBedTemperatureCommand(storage.getSettingInDegreeCelsius("material_bed_temperature"), wait);
+        gcode.writeLine(("M221 S" + storage.getSettingString("material_flow")).c_str());
     }
 
     gcode.setZ(z);

@@ -419,6 +419,7 @@ void FffGcodeWriter::processStartingCode(const SliceDataStorage& storage, const 
     }
 
     gcode.writeCode(getSettingString("machine_start_gcode").c_str());
+    gcode.writeLine(("M221 S" + storage.getSettingString("material_flow_layer_0")).c_str());
 
     if (gcode.getFlavor() == EGCodeFlavor::BFB)
     {
