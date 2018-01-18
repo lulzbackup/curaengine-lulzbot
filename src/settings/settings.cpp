@@ -29,15 +29,17 @@ std::string toString(EGCodeFlavor flavor)
             return "Makerbot";
         case EGCodeFlavor::ULTIGCODE:
             return "UltiGCode";
-        case EGCodeFlavor::REPRAP_VOLUMATRIC:
-            return "RepRap(Volumetric)";
+        case EGCodeFlavor::MARLIN_VOLUMATRIC:
+            return "Marlin(Volumetric)";
         case EGCodeFlavor::GRIFFIN:
             return "Griffin";
         case EGCodeFlavor::REPETIER:
             return "Repetier";
         case EGCodeFlavor::REPRAP:
-        default:
             return "RepRap";
+        case EGCodeFlavor::MARLIN:
+        default:
+            return "Marlin";
     }
 }
 
@@ -91,7 +93,7 @@ void SettingsBase::setSettingInheritBase(std::string key, const SettingsBaseVirt
 }
 
 
-std::string SettingsBase::getSettingString(std::string key) const
+const std::string& SettingsBase::getSettingString(const std::string& key) const
 {
     auto value_it = setting_values.find(key);
     if (value_it != setting_values.end())
@@ -110,7 +112,8 @@ std::string SettingsBase::getSettingString(std::string key) const
 
     cura::logError("Trying to retrieve unregistered setting with no value given: '%s'\n", key.c_str());
     std::exit(-1);
-    return "";
+    static std::string empty_string; // use static object rather than "" to avoid compilation warning
+    return empty_string;
 }
 
 void SettingsMessenger::setSetting(std::string key, std::string value)
@@ -124,20 +127,30 @@ void SettingsMessenger::setSettingInheritBase(std::string key, const SettingsBas
 }
 
 
-std::string SettingsMessenger::getSettingString(std::string key) const
+const std::string& SettingsMessenger::getSettingString(const std::string& key) const
 {
     return parent->getSettingString(key);
 }
 
 int SettingsBaseVirtual::getSettingAsIndex(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return atoi(value.c_str());
+}
+
+int SettingsBaseVirtual::getSettingAsExtruderNr(std::string key) const
+{
+    int extruder_nr = getSettingAsIndex(key);
+    if (extruder_nr == -1)
+    {
+        extruder_nr = getSettingAsIndex("extruder_nr");
+    }
+    return extruder_nr;
 }
 
 int SettingsBaseVirtual::getSettingAsCount(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return atoi(value.c_str());
 }
 
@@ -154,7 +167,7 @@ unsigned int SettingsBaseVirtual::getSettingAsLayerNumber(std::string key) const
 
 double SettingsBaseVirtual::getSettingInMillimeters(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return atof(value.c_str());
 }
 
@@ -165,19 +178,19 @@ coord_t SettingsBaseVirtual::getSettingInMicrons(std::string key) const
 
 double SettingsBaseVirtual::getSettingInAngleDegrees(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return atof(value.c_str());
 }
 
 double SettingsBaseVirtual::getSettingInAngleRadians(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return atof(value.c_str()) / 180.0 * M_PI;
 }
 
 bool SettingsBaseVirtual::getSettingBoolean(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "on")
         return true;
     if (value == "yes")
@@ -190,43 +203,43 @@ bool SettingsBaseVirtual::getSettingBoolean(std::string key) const
 
 double SettingsBaseVirtual::getSettingInDegreeCelsius(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return atof(value.c_str());
 }
 
 double SettingsBaseVirtual::getSettingInMillimetersPerSecond(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return std::max(0.0, atof(value.c_str()));
 }
 
 double SettingsBaseVirtual::getSettingInCubicMillimeters(std::string key) const
 {
-    std::string value = getSettingString(key);
-    return std::max(0.0, atof(value.c_str()));
+    const std::string& value = getSettingString(key);
+    return atof(value.c_str());
 }
 
 double SettingsBaseVirtual::getSettingInPercentage(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return std::max(0.0, atof(value.c_str()));
 }
 
 double SettingsBaseVirtual::getSettingAsRatio(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return atof(value.c_str()) / 100.0;
 }
 
 double SettingsBaseVirtual::getSettingInSeconds(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     return std::max(0.0, atof(value.c_str()));
 }
 
 DraftShieldHeightLimitation SettingsBaseVirtual::getSettingAsDraftShieldHeightLimitation(const std::string key) const
 {
-    const std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "full")
     {
         return DraftShieldHeightLimitation::FULL;
@@ -286,7 +299,7 @@ FMatrix3x3 SettingsBaseVirtual::getSettingAsPointMatrix(std::string key) const
 {
     FMatrix3x3 ret;
 
-    std::string value_string = getSettingString(key);
+    const std::string& value_string = getSettingString(key);
     if (value_string.empty())
     {
         return ret; // standard matrix ([1,0,0],[0,1,0],[0,0,1])
@@ -326,7 +339,7 @@ FMatrix3x3 SettingsBaseVirtual::getSettingAsPointMatrix(std::string key) const
 
 EGCodeFlavor SettingsBaseVirtual::getSettingAsGCodeFlavor(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "Griffin")
         return EGCodeFlavor::GRIFFIN;
     else if (value == "UltiGCode")
@@ -337,16 +350,18 @@ EGCodeFlavor SettingsBaseVirtual::getSettingAsGCodeFlavor(std::string key) const
         return EGCodeFlavor::BFB;
     else if (value == "MACH3")
         return EGCodeFlavor::MACH3;
-    else if (value == "RepRap (Volumatric)")
-        return EGCodeFlavor::REPRAP_VOLUMATRIC;
+    else if (value == "RepRap (Volumetric)")
+        return EGCodeFlavor::MARLIN_VOLUMATRIC;
     else if (value == "Repetier")
         return EGCodeFlavor::REPETIER;
-    return EGCodeFlavor::REPRAP;
+    else if (value == "RepRap (RepRap)")
+        return EGCodeFlavor::REPRAP;
+    return EGCodeFlavor::MARLIN;
 }
 
 EFillMethod SettingsBaseVirtual::getSettingAsFillMethod(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "lines")
         return EFillMethod::LINES;
     if (value == "grid")
@@ -357,8 +372,12 @@ EFillMethod SettingsBaseVirtual::getSettingAsFillMethod(std::string key) const
         return EFillMethod::CUBICSUBDIV;
     if (value == "tetrahedral")
         return EFillMethod::TETRAHEDRAL;
+    if (value == "quarter_cubic")
+        return EFillMethod::QUARTER_CUBIC;
     if (value == "triangles")
         return EFillMethod::TRIANGLES;
+    if (value == "trihexagon")
+        return EFillMethod::TRIHEXAGON;
     if (value == "concentric")
         return EFillMethod::CONCENTRIC;
     if (value == "concentric_3d")
@@ -367,12 +386,16 @@ EFillMethod SettingsBaseVirtual::getSettingAsFillMethod(std::string key) const
         return EFillMethod::ZIG_ZAG;
     if (value == "truncated_octahedron")
         return EFillMethod::TRUNCATED_OCTAHEDRON;
+    if (value == "cross")
+        return EFillMethod::CROSS;
+    if (value == "cross_3d")
+        return EFillMethod::CROSS_3D;
     return EFillMethod::NONE;
 }
 
 EPlatformAdhesion SettingsBaseVirtual::getSettingAsPlatformAdhesion(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "brim")
         return EPlatformAdhesion::BRIM;
     if (value == "raft")
@@ -384,7 +407,7 @@ EPlatformAdhesion SettingsBaseVirtual::getSettingAsPlatformAdhesion(std::string 
 
 ESupportType SettingsBaseVirtual::getSettingAsSupportType(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "everywhere")
         return ESupportType::EVERYWHERE;
     if (value == "buildplate")
@@ -394,19 +417,35 @@ ESupportType SettingsBaseVirtual::getSettingAsSupportType(std::string key) const
 
 EZSeamType SettingsBaseVirtual::getSettingAsZSeamType(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "random")
         return EZSeamType::RANDOM;
     if (value == "shortest")
         return EZSeamType::SHORTEST;
     if (value == "back")
         return EZSeamType::USER_SPECIFIED;
+    if (value == "sharpest_corner")
+        return EZSeamType::SHARPEST_CORNER;
     return EZSeamType::SHORTEST;
+}
+
+EZSeamCornerPrefType SettingsBaseVirtual::getSettingAsZSeamCornerPrefType(std::string key) const
+{
+    const std::string& value = getSettingString(key);
+    if (value == "z_seam_corner_none")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_NONE;
+    if (value == "z_seam_corner_inner")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_INNER;
+    if (value == "z_seam_corner_outer")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_OUTER;
+    if (value == "z_seam_corner_any")
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_ANY;
+    return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_NONE;
 }
 
 ESurfaceMode SettingsBaseVirtual::getSettingAsSurfaceMode(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "normal")
         return ESurfaceMode::NORMAL;
     if (value == "surface")
@@ -418,7 +457,7 @@ ESurfaceMode SettingsBaseVirtual::getSettingAsSurfaceMode(std::string key) const
 
 FillPerimeterGapMode SettingsBaseVirtual::getSettingAsFillPerimeterGapMode(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "nowhere")
     {
         return FillPerimeterGapMode::NOWHERE;
@@ -432,7 +471,7 @@ FillPerimeterGapMode SettingsBaseVirtual::getSettingAsFillPerimeterGapMode(std::
 
 CombingMode SettingsBaseVirtual::getSettingAsCombingMode(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "off")
     {
         return CombingMode::OFF;
@@ -450,7 +489,7 @@ CombingMode SettingsBaseVirtual::getSettingAsCombingMode(std::string key) const
 
 SupportDistPriority SettingsBaseVirtual::getSettingAsSupportDistPriority(std::string key) const
 {
-    std::string value = getSettingString(key);
+    const std::string& value = getSettingString(key);
     if (value == "xy_overrides_z")
     {
         return SupportDistPriority::XY_OVERRIDES_Z;
@@ -462,10 +501,24 @@ SupportDistPriority SettingsBaseVirtual::getSettingAsSupportDistPriority(std::st
     return SupportDistPriority::XY_OVERRIDES_Z;
 }
 
+SlicingTolerance SettingsBaseVirtual::getSettingAsSlicingTolerance(std::string key) const
+{
+    const std::string& value = getSettingString(key);
+    if (value == "inclusive")
+    {
+        return SlicingTolerance::INCLUSIVE;
+    }
+    if (value == "exclusive")
+    {
+        return SlicingTolerance::EXCLUSIVE;
+    }
+    return SlicingTolerance::MIDDLE;
+}
+
 std::vector<int> SettingsBaseVirtual::getSettingAsIntegerList(std::string key) const
 {
     std::vector<int> result;
-    std::string value_string = getSettingString(key);
+    const std::string& value_string = getSettingString(key);
     if (!value_string.empty()) {
         // we're looking to match one or more integer values separated by commas and surrounded by square brackets
         // note that because the QML RegExpValidator only stops unrecognised characters being input

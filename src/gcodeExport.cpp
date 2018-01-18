@@ -1,4 +1,4 @@
-//Copyright (C) 2013 David Braam
+//Copyright (C) 2013 Ultimaker
 //Copyright (c) 2017 Ultimaker B.V.
 //CuraEngine is released under the terms of the AGPLv3 or higher.
 
@@ -30,13 +30,13 @@ GCodeExport::GCodeExport()
     total_print_times = std::vector<double>(static_cast<unsigned char>(PrintFeatureType::NumPrintFeatureTypes), 0.0);
 
     currentSpeed = 1;
-    current_acceleration = -1;
+    current_print_acceleration = -1;
     current_travel_acceleration = -1;
     current_jerk = -1;
     current_max_z_feedrate = -1;
 
     isZHopped = 0;
-    setFlavor(EGCodeFlavor::REPRAP);
+    setFlavor(EGCodeFlavor::MARLIN);
     initial_bed_temp = 0;
 
     extruder_count = 0;
@@ -55,36 +55,9 @@ void GCodeExport::preSetup(const MeshGroup* meshgroup)
 
     extruder_count = meshgroup->getSettingAsCount("machine_extruder_count");
 
-    for (const Mesh& mesh : meshgroup->meshes)
-    {
-        if (!mesh.getSettingBoolean("anti_overhang_mesh")
-            && !mesh.getSettingBoolean("support_mesh")
-        )
-        {
-            extruder_attr[mesh.getSettingAsIndex("extruder_nr")].is_used = true;
-        }
-    }
-
     for (unsigned int extruder_nr = 0; extruder_nr < extruder_count; extruder_nr++)
     {
         const ExtruderTrain* train = meshgroup->getExtruderTrain(extruder_nr);
-
-        if (meshgroup->getSettingAsIndex("adhesion_extruder_nr") == int(extruder_nr) && meshgroup->getSettingAsPlatformAdhesion("adhesion_type") != EPlatformAdhesion::NONE)
-        {
-            extruder_attr[extruder_nr].is_used = true;
-        }
-        for (const Mesh& mesh : meshgroup->meshes)
-        {
-            if ((mesh.getSettingBoolean("support_enable") || mesh.getSettingBoolean("support_mesh")) && (
-                       (mesh.getSettingBoolean("support_bottom_enable") && meshgroup->getSettingAsIndex("support_bottom_extruder_nr") == int(extruder_nr))
-                    || (mesh.getSettingBoolean("support_roof_enable") && meshgroup->getSettingAsIndex("support_roof_extruder_nr") == int(extruder_nr))
-                    || (meshgroup->getSettingAsIndex("support_infill_extruder_nr") == int(extruder_nr))
-                    || (meshgroup->getSettingAsIndex("support_extruder_nr_layer_0") == int(extruder_nr))
-                ))
-            {
-                extruder_attr[extruder_nr].is_used = true;
-            }
-        }
         setFilamentDiameter(extruder_nr, train->getSettingInMicrons("material_diameter")); 
 
         extruder_attr[extruder_nr].prime_pos = Point3(train->getSettingInMicrons("extruder_prime_pos_x"), train->getSettingInMicrons("extruder_prime_pos_y"), train->getSettingInMicrons("extruder_prime_pos_z"));
@@ -100,11 +73,14 @@ void GCodeExport::preSetup(const MeshGroup* meshgroup)
         extruder_attr[extruder_nr].end_code = train->getSettingString("machine_extruder_end_code");
 
         extruder_attr[extruder_nr].last_retraction_prime_speed = train->getSettingInMillimetersPerSecond("retraction_prime_speed"); // the alternative would be switch_extruder_prime_speed, but dual extrusion might not even be configured...
+        extruder_attr[extruder_nr].nozzle_id = train->getSettingString("machine_nozzle_id");  // nozzle types are "AA 0.4", "BB 0.8", "unknown", etc.
     }
 
     machine_name = meshgroup->getSettingString("machine_name");
 
     layer_height = meshgroup->getSettingInMillimeters("layer_height");
+
+    relative_extrusion = meshgroup->getSettingBoolean("relative_extrusion");
 
     if (flavor == EGCodeFlavor::BFB)
     {
@@ -113,6 +89,19 @@ void GCodeExport::preSetup(const MeshGroup* meshgroup)
     else 
     {
         new_line = "\n";
+    }
+
+    // initialize current_max_z_feedrate to firmware defaults
+    for (unsigned int extruder_nr = 0; extruder_nr < extruder_count; extruder_nr++)
+    {
+        const ExtruderTrain* train = meshgroup->getExtruderTrain(extruder_nr);
+        if (train->getSettingInMillimetersPerSecond("max_feedrate_z_override") <= 0.0)
+        {
+            // only initialize if firmware default for z feedrate is used by any extruder
+            // that way we don't omit the M203 if Cura thinks the firmware is already at that feedrate, but it isn't the case
+            current_max_z_feedrate = meshgroup->getSettingInMillimetersPerSecond("machine_max_feedrate_z");
+            break;
+        }
     }
 
     estimateCalculator.setFirmwareDefaults(meshgroup);
@@ -143,9 +132,10 @@ void GCodeExport::setInitialTemp(int extruder_nr, double temp)
 }
 
 
-std::string GCodeExport::getFileHeader(const double* print_time, const std::vector<double>& filament_used, const std::vector<std::string>& mat_ids)
+std::string GCodeExport::getFileHeader(const std::vector<bool>& extruder_is_used, const double* print_time, const std::vector<double>& filament_used, const std::vector<std::string>& mat_ids)
 {
     std::ostringstream prefix;
+
     switch (flavor)
     {
     case EGCodeFlavor::GRIFFIN:
@@ -159,7 +149,7 @@ std::string GCodeExport::getFileHeader(const double* print_time, const std::vect
 
         for (unsigned int extr_nr = 0; extr_nr < extruder_count; extr_nr++)
         {
-            if (!extruder_attr[extr_nr].is_used)
+            if (!extruder_is_used[extr_nr])
             {
                 continue;
             }
@@ -172,7 +162,9 @@ std::string GCodeExport::getFileHeader(const double* print_time, const std::vect
             {
                 prefix << ";EXTRUDER_TRAIN." << extr_nr << ".MATERIAL.GUID:" << mat_ids[extr_nr] << new_line;
             }
-            prefix << ";EXTRUDER_TRAIN." << extr_nr << ".NOZZLE.DIAMETER:" << float(INT2MM(getNozzleSize(extr_nr))) << new_line;
+            const float nozzle_size = float(INT2MM(getNozzleSize(extr_nr)));
+            prefix << ";EXTRUDER_TRAIN." << extr_nr << ".NOZZLE.DIAMETER:" << nozzle_size << new_line;
+            prefix << ";EXTRUDER_TRAIN." << extr_nr << ".NOZZLE.NAME:" << extruder_attr[extr_nr].nozzle_id << new_line;
         }
         prefix << ";BUILD_PLATE.INITIAL_TEMPERATURE:" << initial_bed_temp << new_line;
 
@@ -188,7 +180,7 @@ std::string GCodeExport::getFileHeader(const double* print_time, const std::vect
         prefix << ";PRINT.SIZE.MAX.Y:" << INT2MM(total_bounding_box.max.y) << new_line;
         prefix << ";PRINT.SIZE.MAX.Z:" << INT2MM(total_bounding_box.max.z) << new_line;
         prefix << ";END_OF_HEADER" << new_line;
-        return prefix.str();
+        break;
     default:
         prefix << ";FLAVOR:" << toString(flavor) << new_line;
         prefix << ";TIME:" << ((print_time)? static_cast<int>(*print_time) : 6666) << new_line;
@@ -200,13 +192,14 @@ std::string GCodeExport::getFileHeader(const double* print_time, const std::vect
             prefix << ";NOZZLE_DIAMETER:" << float(INT2MM(getNozzleSize(0))) << new_line;
             // TODO: the second nozzle size isn't always initiated! ";NOZZLE_DIAMETER2:"
         }
-        else if (flavor == EGCodeFlavor::REPRAP)
+        else if (flavor == EGCodeFlavor::REPRAP || flavor == EGCodeFlavor::MARLIN)
         {
             prefix << ";Filament used: " << ((filament_used.size() >= 1)? filament_used[0] / (1000 * extruder_attr[0].filament_area) : 0) << "m" << new_line;
             prefix << ";Layer height: " << layer_height << new_line;
         }
-        return prefix.str();
     }
+
+    return prefix.str();
 }
 
 
@@ -220,14 +213,16 @@ void GCodeExport::setOutputStream(std::ostream* stream)
     *output_stream << std::fixed;
 }
 
+bool GCodeExport::getExtruderIsUsed(const int extruder_nr) const
+{
+    assert(extruder_nr >= 0);
+    assert(extruder_nr < MAX_EXTRUDERS);
+    return extruder_attr[extruder_nr].is_used;
+}
+
 bool GCodeExport::getExtruderUsesTemp(const int extruder_nr) const
 {
     return extruder_attr[extruder_nr].use_temp;
-}
-
-bool GCodeExport::getExtruderIsUsed(const int extruder_nr) const
-{
-    return extruder_attr[extruder_nr].is_used;
 }
 
 int GCodeExport::getNozzleSize(const int extruder_nr) const
@@ -261,7 +256,7 @@ void GCodeExport::setFlavor(EGCodeFlavor flavor)
     else
         for(int n=0; n<MAX_EXTRUDERS; n++)
             extruder_attr[n].extruderCharacter = 'E';
-    if (flavor == EGCodeFlavor::ULTIGCODE || flavor == EGCodeFlavor::REPRAP_VOLUMATRIC)
+    if (flavor == EGCodeFlavor::ULTIGCODE || flavor == EGCodeFlavor::MARLIN_VOLUMATRIC)
     {
         is_volumatric = true;
     }
@@ -270,7 +265,7 @@ void GCodeExport::setFlavor(EGCodeFlavor flavor)
         is_volumatric = false;
     }
 
-    if (flavor == EGCodeFlavor::BFB || flavor == EGCodeFlavor::REPRAP_VOLUMATRIC || flavor == EGCodeFlavor::ULTIGCODE)
+    if (flavor == EGCodeFlavor::BFB || flavor == EGCodeFlavor::MARLIN_VOLUMATRIC || flavor == EGCodeFlavor::ULTIGCODE)
     {
         firmware_retract = true;
     }
@@ -290,21 +285,21 @@ void GCodeExport::setZ(int z)
     this->current_layer_z = z;
 }
 
-Point3 GCodeExport::getPosition()
+Point3 GCodeExport::getPosition() const
 {
     return currentPosition;
 }
-Point GCodeExport::getPositionXY()
+Point GCodeExport::getPositionXY() const
 {
     return Point(currentPosition.x, currentPosition.y);
 }
 
-int GCodeExport::getPositionZ()
+int GCodeExport::getPositionZ() const
 {
     return currentPosition.z;
 }
 
-int GCodeExport::getExtruderNr()
+int GCodeExport::getExtruderNr() const
 {
     return current_extruder;
 }
@@ -316,7 +311,7 @@ void GCodeExport::setFilamentDiameter(unsigned int extruder, int diameter)
     extruder_attr[extruder].filament_area = area;
 }
 
-double GCodeExport::getCurrentExtrudedVolume()
+double GCodeExport::getCurrentExtrudedVolume() const
 {
     double extrusion_amount = current_e_value;
     if (!firmware_retract)
@@ -488,11 +483,26 @@ void GCodeExport::writeLine(const char* line)
     *output_stream << line << new_line;
 }
 
+void GCodeExport::writeExtrusionMode(bool set_relative_extrusion_mode)
+{
+    if (set_relative_extrusion_mode)
+    {
+        *output_stream << "M83 ; relative extrusion mode" << new_line;
+    }
+    else
+    {
+        *output_stream << "M82 ; absolute extrusion mode" << new_line;
+    }
+}
+
 void GCodeExport::resetExtrusionValue()
 {
     if (flavor != EGCodeFlavor::MAKERBOT && flavor != EGCodeFlavor::BFB)
     {
-        *output_stream << "G92 " << extruder_attr[current_extruder].extruderCharacter << "0" << new_line;
+        if (!relative_extrusion)
+        {
+            *output_stream << "G92 " << extruder_attr[current_extruder].extruderCharacter << "0" << new_line;
+        }
         double current_extruded_volume = getCurrentExtrudedVolume();
         extruder_attr[current_extruder].totalFilament += current_extruded_volume;
         for (double& extruded_volume_at_retraction : extruder_attr[current_extruder].extruded_volume_at_previous_n_retractions)
@@ -652,16 +662,17 @@ void GCodeExport::writeExtrusion(int x, int y, int z, double speed, double extru
 
     if (extrusion_mm3_per_mm < 0.0)
     {
-        logWarning("Warning! Negative extrusion move!");
+        logWarning("Warning! Negative extrusion move!\n");
     }
 
     double extrusion_per_mm = mm3ToE(extrusion_mm3_per_mm);
 
-    Point3 diff = Point3(x,y,z) - currentPosition;
     if (isZHopped > 0)
     {
         writeZhopEnd();
     }
+
+    Point3 diff = Point3(x,y,z) - currentPosition;
 
     writeUnretractionAndPrime();
 
@@ -689,7 +700,8 @@ void GCodeExport::writeFXYZE(double speed, int x, int y, int z, double e, PrintF
     }
     if (e != current_e_value)
     {
-        *output_stream << " " << extruder_attr[current_extruder].extruderCharacter << PrecisionedDouble{5, e};
+        const double output_e = (relative_extrusion)? e - current_e_value : e;
+        *output_stream << " " << extruder_attr[current_extruder].extruderCharacter << PrecisionedDouble{5, output_e};
     }
     *output_stream << new_line;
     
@@ -701,7 +713,8 @@ void GCodeExport::writeFXYZE(double speed, int x, int y, int z, double e, PrintF
 void GCodeExport::writeUnretractionAndPrime()
 {
     const double prime_volume = extruder_attr[current_extruder].prime_volume;
-    current_e_value += mm3ToE(prime_volume);
+    const double prime_volume_e = mm3ToE(prime_volume);
+    current_e_value += prime_volume_e;
     if (extruder_attr[current_extruder].retraction_e_amount_current)
     {
         if (firmware_retract)
@@ -718,7 +731,8 @@ void GCodeExport::writeUnretractionAndPrime()
         else
         {
             current_e_value += extruder_attr[current_extruder].retraction_e_amount_current;
-            *output_stream << "G1 F" << PrecisionedDouble{1, extruder_attr[current_extruder].last_retraction_prime_speed * 60} << " " << extruder_attr[current_extruder].extruderCharacter << PrecisionedDouble{5, current_e_value} << new_line;
+            const double output_e = (relative_extrusion)? extruder_attr[current_extruder].retraction_e_amount_current + prime_volume_e : current_e_value;
+            *output_stream << "G1 F" << PrecisionedDouble{1, extruder_attr[current_extruder].last_retraction_prime_speed * 60} << " " << extruder_attr[current_extruder].extruderCharacter << PrecisionedDouble{5, output_e} << new_line;
             currentSpeed = extruder_attr[current_extruder].last_retraction_prime_speed;
             estimateCalculator.plan(TimeEstimateCalculator::Position(INT2MM(currentPosition.x), INT2MM(currentPosition.y), INT2MM(currentPosition.z), eToMm(current_e_value)), currentSpeed, PrintFeatureType::MoveRetraction);
         }
@@ -730,7 +744,9 @@ void GCodeExport::writeUnretractionAndPrime()
     }
     else if (prime_volume > 0.0)
     {
-        *output_stream << "G1 F" << PrecisionedDouble{1, extruder_attr[current_extruder].last_retraction_prime_speed * 60} << " " << extruder_attr[current_extruder].extruderCharacter << PrecisionedDouble{5, current_e_value} << new_line;
+        const double output_e = (relative_extrusion)? prime_volume_e : current_e_value;
+        *output_stream << "G1 F" << PrecisionedDouble{1, extruder_attr[current_extruder].last_retraction_prime_speed * 60} << " " << extruder_attr[current_extruder].extruderCharacter;
+        *output_stream << PrecisionedDouble{5, output_e} << new_line;
         currentSpeed = extruder_attr[current_extruder].last_retraction_prime_speed;
         estimateCalculator.plan(TimeEstimateCalculator::Position(INT2MM(currentPosition.x), INT2MM(currentPosition.y), INT2MM(currentPosition.z), eToMm(current_e_value)), currentSpeed, PrintFeatureType::NoneType);
     }
@@ -805,8 +821,8 @@ void GCodeExport::writeRetraction(const RetractionConfig& config, bool force, bo
     {
         double speed = ((retraction_diff_e_amount < 0.0)? config.speed : extr_attr.last_retraction_prime_speed) * 60;
         current_e_value += retraction_diff_e_amount;
-        *output_stream << "G1 F" << PrecisionedDouble{1, speed} << " "
-            << extr_attr.extruderCharacter << PrecisionedDouble{5, current_e_value} << new_line;
+        const double output_e = (relative_extrusion)? retraction_diff_e_amount : current_e_value;
+        *output_stream << "G1 F" << PrecisionedDouble{1, speed} << " " << extr_attr.extruderCharacter << PrecisionedDouble{5, output_e} << new_line;
         currentSpeed = speed;
         estimateCalculator.plan(TimeEstimateCalculator::Position(INT2MM(currentPosition.x), INT2MM(currentPosition.y), INT2MM(currentPosition.z), eToMm(current_e_value)), currentSpeed, PrintFeatureType::MoveRetraction);
         extr_attr.last_retraction_prime_speed = config.primeSpeed;
@@ -822,8 +838,10 @@ void GCodeExport::writeZhopStart(int hop_height)
     if (hop_height > 0)
     {
         isZHopped = hop_height;
-        *output_stream << "G1 Z" << MMtoStream{current_layer_z + isZHopped} << new_line;
+        currentSpeed = current_max_z_feedrate;
+        *output_stream << "G1 F" << PrecisionedDouble{1, current_max_z_feedrate * 60} << " Z" << MMtoStream{current_layer_z + isZHopped} << new_line;
         total_bounding_box.includeZ(current_layer_z + isZHopped);
+        assert(current_max_z_feedrate > 0.0 && "Z feedrate should be positive");
     }
 }
 
@@ -833,12 +851,15 @@ void GCodeExport::writeZhopEnd()
     {
         isZHopped = 0;
         currentPosition.z = current_layer_z;
-        *output_stream << "G1 Z" << MMtoStream{current_layer_z} << new_line;
+        currentSpeed = current_max_z_feedrate;
+        *output_stream << "G1 F" << PrecisionedDouble{1, current_max_z_feedrate * 60} << " Z" << MMtoStream{current_layer_z} << new_line;
+        assert(current_max_z_feedrate > 0.0 && "Z feedrate should be positive");
     }
 }
 
 void GCodeExport::startExtruder(int new_extruder)
 {
+    extruder_attr[new_extruder].is_used = true;
     if (new_extruder != current_extruder) // wouldn't be the case on the very first extruder start if it's extruder 0
     {
         if (flavor == EGCodeFlavor::MAKERBOT)
@@ -856,7 +877,23 @@ void GCodeExport::startExtruder(int new_extruder)
     assert(getCurrentExtrudedVolume() == 0.0 && "Just after an extruder switch we haven't extruded anything yet!");
     resetExtrusionValue(); // zero the E value on the new extruder, just to be sure
 
-    writeCode(extruder_attr[new_extruder].start_code.c_str());
+    const char *start_code = extruder_attr[new_extruder].start_code.c_str();
+
+    if (*start_code)
+    {
+        if (relative_extrusion)
+        {
+            writeExtrusionMode(false); // ensure absolute extrusion mode is set before the start gcode
+        }
+
+        writeCode(start_code);
+
+        if (relative_extrusion)
+        {
+            writeExtrusionMode(true); // restore relative extrusion mode
+        }
+    }
+
     CommandSocket::setExtruderForSend(new_extruder);
     CommandSocket::setSendCurrentPosition( getPositionXY() );
 
@@ -877,7 +914,22 @@ void GCodeExport::switchExtruder(int new_extruder, const RetractionConfig& retra
 
     int old_extruder = current_extruder;
 
-    writeCode(extruder_attr[old_extruder].end_code.c_str());
+    const char *end_code = extruder_attr[old_extruder].end_code.c_str();
+
+    if (*end_code)
+    {
+        if (relative_extrusion)
+        {
+            writeExtrusionMode(false); // ensure absolute extrusion mode is set before the end gcode
+        }
+
+        writeCode(end_code);
+
+        if (relative_extrusion)
+        {
+            writeExtrusionMode(true); // restore relative extrusion mode
+        }
+    }
 
     startExtruder(new_extruder);
 }
@@ -984,57 +1036,75 @@ void GCodeExport::writeBedTemperatureCommand(double temperature, bool wait)
     *output_stream << PrecisionedDouble{1, temperature} << new_line;
 }
 
-void GCodeExport::writeAcceleration(double acceleration, bool for_travel_moves)
+void GCodeExport::writePrintAcceleration(double acceleration)
 {
-    if (getFlavor() == EGCodeFlavor::REPETIER)
+    switch (getFlavor())
     {
-        int m_code = 0;
-        if (for_travel_moves)
-        {
+        case EGCodeFlavor::REPETIER:
+            if (current_print_acceleration != acceleration)
+            {
+                *output_stream << "M201 X" << PrecisionedDouble{0, acceleration} << " Y" << PrecisionedDouble{0, acceleration} << new_line;
+            }
+            break;
+        case EGCodeFlavor::REPRAP:
+            if (current_print_acceleration != acceleration)
+            {
+                *output_stream << "M204 P" << PrecisionedDouble{0, acceleration} << new_line;
+            }
+            break;
+        default:
+            // MARLIN, etc. only have one acceleration for both print and travel
+            if (current_print_acceleration != acceleration)
+            {
+                *output_stream << "M204 S" << PrecisionedDouble{0, acceleration} << new_line;
+            }
+            break;
+    }
+    current_print_acceleration = acceleration;
+    estimateCalculator.setAcceleration(acceleration);
+}
+
+void GCodeExport::writeTravelAcceleration(double acceleration)
+{
+    switch (getFlavor())
+    {
+        case EGCodeFlavor::REPETIER:
             if (current_travel_acceleration != acceleration)
             {
-                m_code = 202;   // set travel acceleration
-                current_travel_acceleration = acceleration;
+                *output_stream << "M202 X" << PrecisionedDouble{0, acceleration} << " Y" << PrecisionedDouble{0, acceleration} << new_line;
             }
-        }
-        else
-        {
-            if (current_acceleration != acceleration)
+            break;
+        case EGCodeFlavor::REPRAP:
+            if (current_travel_acceleration != acceleration)
             {
-                m_code = 201;  // set print acceleration
-                current_acceleration = acceleration;
+                *output_stream << "M204 T" << PrecisionedDouble{0, acceleration} << new_line;
             }
-        }
-        if (m_code != 0)
-        {
-            *output_stream << "M" << m_code << " X" << PrecisionedDouble{0, acceleration} << " Y" << PrecisionedDouble{0, acceleration} << new_line;
-            estimateCalculator.setAcceleration(acceleration);
-        }
+            break;
+        default:
+            // MARLIN, etc. only have one acceleration for both print and travel
+            writePrintAcceleration(acceleration);
+            break;
     }
-    else
-    {
-        if (current_acceleration != acceleration)
-        {
-            *output_stream << "M204 S" << PrecisionedDouble{0, acceleration} << new_line; // Print and Travel acceleration
-            current_acceleration = acceleration;
-            estimateCalculator.setAcceleration(acceleration);
-        }
-    }
+    current_travel_acceleration = acceleration;
+    estimateCalculator.setAcceleration(acceleration);
 }
 
 void GCodeExport::writeJerk(double jerk)
 {
     if (current_jerk != jerk)
     {
-        if (getFlavor() == EGCodeFlavor::REPETIER)
+        switch (getFlavor())
         {
-            *output_stream << "M207 X";
+            case EGCodeFlavor::REPETIER:
+                *output_stream << "M207 X" << PrecisionedDouble{2, jerk} << new_line;
+                break;
+            case EGCodeFlavor::REPRAP:
+                *output_stream << "M566 X" << PrecisionedDouble{2, jerk * 60} << " Y" << PrecisionedDouble{2, jerk * 60} << new_line;
+                break;
+            default:
+                *output_stream << "M205 X" << PrecisionedDouble{2, jerk} << " Y" << PrecisionedDouble{2, jerk} << new_line;
+                break;
         }
-        else
-        {
-            *output_stream << "M205 X";
-        }
-        *output_stream << PrecisionedDouble{2, jerk} << new_line;
         current_jerk = jerk;
         estimateCalculator.setMaxXyJerk(jerk);
     }
@@ -1044,7 +1114,14 @@ void GCodeExport::writeMaxZFeedrate(double max_z_feedrate)
 {
     if (current_max_z_feedrate != max_z_feedrate)
     {
-        *output_stream << "M203 Z" << PrecisionedDouble{2, max_z_feedrate} << new_line;
+        if (getFlavor() == EGCodeFlavor::REPRAP)
+        {
+            *output_stream << "M203 Z" << PrecisionedDouble{2, max_z_feedrate * 60} << new_line;
+        }
+        else
+        {
+            *output_stream << "M203 Z" << PrecisionedDouble{2, max_z_feedrate} << new_line;
+        }
         current_max_z_feedrate = max_z_feedrate;
         estimateCalculator.setMaxZFeedrate(max_z_feedrate);
     }

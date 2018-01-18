@@ -25,14 +25,14 @@ namespace cura
 enum class EGCodeFlavor
 {
 /**
- * RepRap flavored GCode is Marlin/Sprinter/Repetier based GCode.
+ * Marlin flavored GCode is Marlin/Sprinter based GCode.
  *  This is the most commonly used GCode set.
  *  G0 for moves, G1 for extrusion.
  *  E values give mm of filament extrusion.
  *  Retraction is done on E values with G1. Start/end code is added.
  *  M106 Sxxx and M107 are used to turn the fan on/off.
  **/
-    REPRAP = 0,
+    MARLIN = 0,
 /**
  * UltiGCode flavored is Marlin based GCode.
  *  UltiGCode uses less settings on the slicer and puts more settings in the firmware. This makes for more hardware/material independed GCode.
@@ -75,7 +75,7 @@ enum class EGCodeFlavor
  *  Retraction is done with G10 and G11. Retraction settings are ignored. G10 S1 is used for multi-extruder switch retraction.
  *  M106 Sxxx and M107 are used to turn the fan on/off.
  **/
-    REPRAP_VOLUMATRIC = 5,
+    MARLIN_VOLUMATRIC = 5,
 /**
  * Griffin flavored is Marlin based GCode.
  *  This is a type of RepRap used for machines with multiple extruder trains.
@@ -88,6 +88,11 @@ enum class EGCodeFlavor
     GRIFFIN = 6,
 
     REPETIER = 7,
+
+/**
+ * Real RepRap GCode suitable for printers using RepRap firmware (e.g. Duet controllers)
+ **/
+    REPRAP = 8,
 };
 
 /*!
@@ -107,11 +112,15 @@ enum class EFillMethod
     CUBIC,
     CUBICSUBDIV,
     TETRAHEDRAL,
+    QUARTER_CUBIC,
     TRIANGLES,
+    TRIHEXAGON,
     CONCENTRIC,
     CONCENTRIC_3D,
     ZIG_ZAG,
     TRUNCATED_OCTAHEDRON,
+    CROSS,
+    CROSS_3D,
     NONE
 };
 
@@ -140,7 +149,16 @@ enum class EZSeamType
 {
     RANDOM,
     SHORTEST,
-    USER_SPECIFIED
+    USER_SPECIFIED,
+    SHARPEST_CORNER
+};
+
+enum class EZSeamCornerPrefType
+{
+    Z_SEAM_CORNER_PREF_NONE,
+    Z_SEAM_CORNER_PREF_INNER,
+    Z_SEAM_CORNER_PREF_OUTER,
+    Z_SEAM_CORNER_PREF_ANY
 };
 
 enum class ESurfaceMode
@@ -178,6 +196,13 @@ enum class SupportDistPriority
     Z_OVERRIDES_XY
 };
 
+enum class SlicingTolerance
+{
+    MIDDLE,
+    INCLUSIVE,
+    EXCLUSIVE
+};
+
 #define MAX_EXTRUDERS 16
 
 //Maximum number of infill layers that can be combined into a single infill extrusion area.
@@ -195,7 +220,7 @@ class SettingsBaseVirtual
 protected:
     SettingsBaseVirtual* parent;
 public:
-    virtual std::string getSettingString(std::string key) const = 0;
+    virtual const std::string& getSettingString(const std::string& key) const = 0;
     
     virtual void setSetting(std::string key, std::string value) = 0;
 
@@ -218,6 +243,12 @@ public:
     
     int getSettingAsIndex(std::string key) const;
     int getSettingAsCount(std::string key) const;
+
+    /*!
+     * Get a setting as an int, but if it's -1 then return
+     * the value of the setting "extruder_nr"
+     */
+    int getSettingAsExtruderNr(std::string key) const;
 
     /*!
      * \brief Interprets a setting as a layer number.
@@ -250,10 +281,12 @@ public:
     EPlatformAdhesion getSettingAsPlatformAdhesion(std::string key) const;
     ESupportType getSettingAsSupportType(std::string key) const;
     EZSeamType getSettingAsZSeamType(std::string key) const;
+    EZSeamCornerPrefType getSettingAsZSeamCornerPrefType(std::string key) const;
     ESurfaceMode getSettingAsSurfaceMode(std::string key) const;
     FillPerimeterGapMode getSettingAsFillPerimeterGapMode(std::string key) const;
     CombingMode getSettingAsCombingMode(std::string key) const;
     SupportDistPriority getSettingAsSupportDistPriority(std::string key) const;
+    SlicingTolerance getSettingAsSlicingTolerance(std::string key) const;
     std::vector<int> getSettingAsIntegerList(std::string key) const;
 };
 
@@ -286,7 +319,7 @@ public:
      */
     void setSetting(std::string key, std::string value);
     void setSettingInheritBase(std::string key, const SettingsBaseVirtual& parent); //!< See \ref SettingsBaseVirtual::setSettingInheritBase
-    std::string getSettingString(std::string key) const; //!< Get a setting from this SettingsBase (or any ancestral SettingsBase)
+    const std::string& getSettingString(const std::string& key) const; //!< Get a setting from this SettingsBase (or any ancestral SettingsBase)
     
     std::string getAllLocalSettingsString() const
     {
@@ -327,7 +360,7 @@ public:
     
     void setSetting(std::string key, std::string value); //!< Set a setting of the parent SettingsBase to a given value
     void setSettingInheritBase(std::string key, const SettingsBaseVirtual& parent); //!< See \ref SettingsBaseVirtual::setSettingInheritBase
-    std::string getSettingString(std::string key) const; //!< Get a setting from the parent SettingsBase (or any further ancestral SettingsBase)
+    const std::string& getSettingString(const std::string& key) const; //!< Get a setting from the parent SettingsBase (or any further ancestral SettingsBase)
 };
 
 

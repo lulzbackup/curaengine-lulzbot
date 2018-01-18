@@ -1,4 +1,4 @@
-/** Copyright (C) 2013 David Braam - Released under terms of the AGPLv3 License */
+/** Copyright (C) 2013 Ultimaker - Released under terms of the AGPLv3 License */
 #include <stdio.h>
 
 #include <algorithm> // remove_if
@@ -734,7 +734,7 @@ ClosePolygonResult SlicerLayer::findPolygonPointClosestTo(Point input)
     return ret;
 }
 
-void SlicerLayer::makePolygons(const Mesh* mesh, bool keep_none_closed, bool extensive_stitching)
+void SlicerLayer::makePolygons(const Mesh* mesh, bool keep_none_closed, bool extensive_stitching, bool is_initial_layer)
 {
     Polygons open_polylines;
 
@@ -766,7 +766,9 @@ void SlicerLayer::makePolygons(const Mesh* mesh, bool keep_none_closed, bool ext
     for (PolygonRef polyline : open_polylines)
     {
         if (polyline.size() > 0)
+        {
             openPolylines.add(polyline);
+        }
     }
 
     //Remove all the tiny polygons, or polygons that are not closed. As they do not contribute to the actual print.
@@ -780,6 +782,11 @@ void SlicerLayer::makePolygons(const Mesh* mesh, bool keep_none_closed, bool ext
     polygons.removeDegenerateVerts(); // remove verts connected to overlapping line segments
 
     int xy_offset = mesh->getSettingInMicrons("xy_offset");
+    if (is_initial_layer)
+    {
+        xy_offset = mesh->getSettingInMicrons("xy_offset_layer_0");
+    }
+
     if (xy_offset != 0)
     {
         polygons = polygons.offset(xy_offset);
@@ -787,15 +794,22 @@ void SlicerLayer::makePolygons(const Mesh* mesh, bool keep_none_closed, bool ext
 }
 
 
-Slicer::Slicer(Mesh* mesh, int initial, int thickness, int slice_layer_count, bool keep_none_closed, bool extensive_stitching)
+Slicer::Slicer(Mesh* mesh, int initial_layer_thickness, int thickness, int slice_layer_count, bool keep_none_closed, bool extensive_stitching)
 : mesh(mesh)
 {
+    SlicingTolerance slicing_tolerance = mesh->getSettingAsSlicingTolerance("slicing_tolerance");
+
     assert(slice_layer_count > 0);
 
     TimeKeeper slice_timer;
 
     layers.resize(slice_layer_count);
 
+    int initial = initial_layer_thickness - thickness; // slice height of initial slice layer
+    if (slicing_tolerance == SlicingTolerance::MIDDLE)
+    {
+        initial += thickness / 2;
+    }
 
     for(int32_t layer_nr = 0; layer_nr < slice_layer_count; layer_nr++)
     {
@@ -892,7 +906,28 @@ Slicer::Slicer(Mesh* mesh, int initial, int thickness, int slice_layer_count, bo
 #pragma omp parallel for default(none) shared(mesh,layers_ref) firstprivate(keep_none_closed, extensive_stitching)
     for(unsigned int layer_nr=0; layer_nr<layers_ref.size(); layer_nr++)
     {
-        layers_ref[layer_nr].makePolygons(mesh, keep_none_closed, extensive_stitching);
+        layers_ref[layer_nr].makePolygons(mesh, keep_none_closed, extensive_stitching, layer_nr == 0);
+    }
+
+    switch(slicing_tolerance)
+    {
+    case SlicingTolerance::INCLUSIVE:
+        for (unsigned int layer_nr = 0; layer_nr + 1 < layers_ref.size(); layer_nr++)
+        {
+            layers[layer_nr].polygons = layers[layer_nr].polygons.unionPolygons(layers[layer_nr + 1].polygons);
+        }
+        break;
+    case SlicingTolerance::EXCLUSIVE:
+        for (unsigned int layer_nr = 0; layer_nr + 1 < layers_ref.size(); layer_nr++)
+        {
+            layers[layer_nr].polygons = layers[layer_nr].polygons.intersection(layers[layer_nr + 1].polygons);
+        }
+        layers.back().polygons.clear();
+        break;
+    case SlicingTolerance::MIDDLE:
+    default:
+        // do nothing
+        ;
     }
 
     mesh->expandXY(mesh->getSettingInMicrons("xy_offset"));
