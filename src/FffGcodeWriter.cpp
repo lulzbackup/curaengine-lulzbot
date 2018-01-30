@@ -391,47 +391,81 @@ void FffGcodeWriter::setInfillAndSkinAngles(SliceMeshStorage& mesh)
 
 void FffGcodeWriter::processStartingCode(const SliceDataStorage& storage, const unsigned int start_extruder_nr)
 {
+    std::vector<bool> extruder_is_used = storage.getExtrudersUsed();
+    const unsigned num_extruders = storage.getSettingAsCount("machine_extruder_count");
     if (!CommandSocket::isInstantiated())
     {
-        std::vector<bool> extruder_is_used = storage.getExtrudersUsed();
         std::string prefix = gcode.getFileHeader(extruder_is_used);
         gcode.writeCode(prefix.c_str());
     }
 
     gcode.writeComment("Generated with Cura_SteamEngine " VERSION);
 
-    if (gcode.getFlavor() == EGCodeFlavor::REPRAP || gcode.getFlavor() == EGCodeFlavor::GRIFFIN)
+    if (gcode.getFlavor() == EGCodeFlavor::GRIFFIN)
     {
         gcode.writeCode("T0"); // required before any temperature setting commands
     }
 
     if (gcode.getFlavor() != EGCodeFlavor::ULTIGCODE && gcode.getFlavor() != EGCodeFlavor::GRIFFIN)
     {
-        if (getSettingBoolean("material_bed_temp_prepend")) 
+        if (num_extruders > 1 || gcode.getFlavor() == EGCodeFlavor::REPRAP)
         {
-            if (getSettingBoolean("machine_heated_bed") && getSettingInDegreeCelsius("material_bed_temperature_layer_0") != 0)
+            std::ostringstream tmp;
+            tmp << "T" << start_extruder_nr;
+            gcode.writeLine(tmp.str().c_str());
+        }
+
+        if (getSettingBoolean("material_bed_temp_prepend"))
+        {
+            if (getSettingBoolean("machine_heated_bed"))
             {
-                gcode.writeBedTemperatureCommand(getSettingInDegreeCelsius("material_bed_temperature_layer_0"), getSettingBoolean("material_bed_temp_wait"));
+                double bed_temp = getSettingInDegreeCelsius("material_bed_temperature_layer_0");
+                if (bed_temp != 0)
+                {
+                    gcode.writeBedTemperatureCommand(bed_temp, getSettingBoolean("material_bed_temp_wait"));
+                }
             }
         }
 
-        if (getSettingBoolean("material_print_temp_prepend")) 
+        if (getSettingBoolean("material_print_temp_prepend"))
         {
-            for (int extruder_nr = 0; extruder_nr < storage.getSettingAsCount("machine_extruder_count"); extruder_nr++)
+            for (unsigned extruder_nr = 0; extruder_nr < num_extruders; extruder_nr++)
             {
-                ExtruderTrain& train = *storage.meshgroup->getExtruderTrain(extruder_nr);
-                double print_temp_0 = train.getSettingInDegreeCelsius("material_print_temperature_layer_0");
-                double print_temp_here = (print_temp_0 != 0)? print_temp_0 : train.getSettingInDegreeCelsius("material_print_temperature");
-                gcode.writeTemperatureCommand(extruder_nr, print_temp_here);
-            }
-            if (getSettingBoolean("material_print_temp_wait")) 
-            {
-                for (int extruder_nr = 0; extruder_nr < storage.getSettingAsCount("machine_extruder_count"); extruder_nr++)
+                if (extruder_is_used[extruder_nr])
                 {
                     ExtruderTrain& train = *storage.meshgroup->getExtruderTrain(extruder_nr);
-                    double print_temp_0 = train.getSettingInDegreeCelsius("material_print_temperature_layer_0");
-                    double print_temp_here = (print_temp_0 != 0)? print_temp_0 : train.getSettingInDegreeCelsius("material_print_temperature");
-                    gcode.writeTemperatureCommand(extruder_nr, print_temp_here, true);
+                    double extruder_temp;
+                    if (extruder_nr == start_extruder_nr)
+                    {
+                        double print_temp_0 = train.getSettingInDegreeCelsius("material_print_temperature_layer_0");
+                        extruder_temp = (print_temp_0 != 0)? print_temp_0 : train.getSettingInDegreeCelsius("material_print_temperature");
+                    }
+                    else
+                    {
+                        extruder_temp = train.getSettingInDegreeCelsius("material_standby_temperature");
+                    }
+                    gcode.writeTemperatureCommand(extruder_nr, extruder_temp);
+                }
+            }
+            if (getSettingBoolean("material_print_temp_wait"))
+            {
+                for (unsigned extruder_nr = 0; extruder_nr < num_extruders; extruder_nr++)
+                {
+                    if (extruder_is_used[extruder_nr])
+                    {
+                        ExtruderTrain& train = *storage.meshgroup->getExtruderTrain(extruder_nr);
+                        double extruder_temp;
+                        if (extruder_nr == start_extruder_nr)
+                        {
+                            double print_temp_0 = train.getSettingInDegreeCelsius("material_print_temperature_layer_0");
+                            extruder_temp = (print_temp_0 != 0)? print_temp_0 : train.getSettingInDegreeCelsius("material_print_temperature");
+                        }
+                        else
+                        {
+                            extruder_temp = train.getSettingInDegreeCelsius("material_standby_temperature");
+                        }
+                        gcode.writeTemperatureCommand(extruder_nr, extruder_temp, true);
+                    }
                 }
             }
         }
@@ -704,15 +738,16 @@ LayerPlan& FffGcodeWriter::processLayer(const SliceDataStorage& storage, int lay
                 continue;
             }
             z = mesh.layers[layer_nr].printZ;
+            layer_thickness = mesh.layers[layer_nr].thickness;
             break;
         }
+
         if (layer_nr == 0)
         {
             if (getSettingAsPlatformAdhesion("adhesion_type") == EPlatformAdhesion::RAFT)
             {
                 include_helper_parts = false;
             }
-            layer_thickness = getSettingInMicrons("layer_height_0");
         }
     }
 
@@ -1235,7 +1270,8 @@ bool FffGcodeWriter::processMultiLayerInfill(const SliceDataStorage& storage, La
                 setExtruder_addPrime(storage, gcode_layer, extruder_nr);
                 gcode_layer.setIsInside(true); // going to print stuff inside print object
                 gcode_layer.addPolygonsByOptimizer(infill_polygons, mesh_config.infill_config[combine_idx]);
-                gcode_layer.addLinesByOptimizer(infill_lines, mesh_config.infill_config[combine_idx], (infill_pattern == EFillMethod::ZIG_ZAG)? SpaceFillType::PolyLines : SpaceFillType::Lines);
+                const bool enable_travel_optimization = mesh.getSettingBoolean("infill_enable_travel_optimization");
+                gcode_layer.addLinesByOptimizer(infill_lines, mesh_config.infill_config[combine_idx], (infill_pattern == EFillMethod::ZIG_ZAG)? SpaceFillType::PolyLines : SpaceFillType::Lines, enable_travel_optimization);
             }
         }
     }
@@ -1315,13 +1351,14 @@ bool FffGcodeWriter::processSingleLayerInfill(const SliceDataStorage& storage, L
         setExtruder_addPrime(storage, gcode_layer, extruder_nr);
         gcode_layer.setIsInside(true); // going to print stuff inside print object
         gcode_layer.addPolygonsByOptimizer(infill_polygons, mesh_config.infill_config[0]);
+        const bool enable_travel_optimization = mesh.getSettingBoolean("infill_enable_travel_optimization");
         if (pattern == EFillMethod::GRID || pattern == EFillMethod::LINES || pattern == EFillMethod::TRIANGLES || pattern == EFillMethod::CUBIC || pattern == EFillMethod::TETRAHEDRAL || pattern == EFillMethod::QUARTER_CUBIC || pattern == EFillMethod::CUBICSUBDIV)
         {
-            gcode_layer.addLinesByOptimizer(infill_lines, mesh_config.infill_config[0], SpaceFillType::Lines, mesh.getSettingInMicrons("infill_wipe_dist"));
+            gcode_layer.addLinesByOptimizer(infill_lines, mesh_config.infill_config[0], SpaceFillType::Lines, enable_travel_optimization, mesh.getSettingInMicrons("infill_wipe_dist"));
         }
         else
         {
-            gcode_layer.addLinesByOptimizer(infill_lines, mesh_config.infill_config[0], (pattern == EFillMethod::ZIG_ZAG || pattern == EFillMethod::TRUNCATED_OCTAHEDRON)? SpaceFillType::PolyLines : SpaceFillType::Lines);
+            gcode_layer.addLinesByOptimizer(infill_lines, mesh_config.infill_config[0], (pattern == EFillMethod::ZIG_ZAG || pattern == EFillMethod::TRUNCATED_OCTAHEDRON)? SpaceFillType::PolyLines : SpaceFillType::Lines, enable_travel_optimization);
         }
     }
     return added_something;
@@ -1753,16 +1790,17 @@ void FffGcodeWriter::processSkinPrintFeature(const SliceDataStorage& storage, La
             near_start_location = getSeamAvoidingLocation(area, skin_angle, gcode_layer.getLastPlannedPositionOrStartingPosition());
         }
 
+        constexpr bool enable_travel_optimization = false;
         constexpr float flow = 1.0;
         if (pattern == EFillMethod::GRID || pattern == EFillMethod::LINES || pattern == EFillMethod::TRIANGLES || pattern == EFillMethod::CUBIC || pattern == EFillMethod::TETRAHEDRAL || pattern == EFillMethod::QUARTER_CUBIC || pattern == EFillMethod::CUBICSUBDIV)
         {
-            gcode_layer.addLinesByOptimizer(skin_lines, config, SpaceFillType::Lines, mesh.getSettingInMicrons("infill_wipe_dist"), flow, near_start_location);
+            gcode_layer.addLinesByOptimizer(skin_lines, config, SpaceFillType::Lines, enable_travel_optimization, mesh.getSettingInMicrons("infill_wipe_dist"), flow, near_start_location);
         }
         else
         {
             SpaceFillType space_fill_type = (pattern == EFillMethod::ZIG_ZAG)? SpaceFillType::PolyLines : SpaceFillType::Lines;
             constexpr coord_t wipe_dist = 0;
-            gcode_layer.addLinesByOptimizer(skin_lines, config, space_fill_type, wipe_dist, flow, near_start_location);
+            gcode_layer.addLinesByOptimizer(skin_lines, config, space_fill_type, enable_travel_optimization, wipe_dist, flow, near_start_location);
         }
     }
 }
@@ -1918,7 +1956,6 @@ bool FffGcodeWriter::processSupportInfill(const SliceDataStorage& storage, Layer
         if (default_support_line_distance <= 0
             || part.infill_area_per_combine_per_density.empty())
         {
-            assert(!part.insets.empty() && "No empty support infill parts may exist.");
             continue;
         }
 

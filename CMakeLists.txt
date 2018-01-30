@@ -39,8 +39,14 @@ if(CMAKE_BUILD_TYPE MATCHES DEBUG OR CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
     add_definitions(-DDEBUG)
 endif()
 
-# Add warnings
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall") # Add warnings
+
+option (ENABLE_MORE_COMPILER_OPTIMIZATION_FLAGS
+    "Enable more optimization flags" ON)
+if (ENABLE_MORE_COMPILER_OPTIMIZATION_FLAGS)
+    message (STATUS "Compile with more optimization flags")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -Ofast -funroll-loops")
+endif ()
 
 if(NOT APPLE AND NOT WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++")
@@ -92,6 +98,7 @@ set(engine_SRCS # Except main.cpp.
     src/support.cpp
     src/timeEstimate.cpp
     src/TopSurface.cpp
+    src/TreeSupport.cpp
     src/WallsComputation.cpp
     src/wallOverlap.cpp
     src/Weaver.cpp
@@ -118,6 +125,8 @@ set(engine_SRCS # Except main.cpp.
     src/settings/SettingContainer.cpp
     src/settings/SettingRegistry.cpp
     src/settings/settings.cpp
+    src/settings/AdaptiveLayerHeights.cpp
+    src/settings/AdaptiveLayerHeights.h
 
     src/utils/AABB.cpp
     src/utils/AABB3D.cpp
@@ -126,13 +135,14 @@ set(engine_SRCS # Except main.cpp.
     src/utils/LinearAlg2D.cpp
     src/utils/ListPolyIt.cpp
     src/utils/logoutput.cpp
+    src/utils/MinimumSpanningTree.cpp
     src/utils/PolygonsPointIndex.cpp
     src/utils/PolygonProximityLinker.cpp
     src/utils/polygonUtils.cpp
     src/utils/polygon.cpp
     src/utils/ProximityPointLink.cpp
-    src/utils/SpaceFillingTree.cpp
     src/utils/socket.cpp
+    src/utils/SpaceFillingTree.cpp
 )
 
 # List of tests. For each test there must be a file tests/${NAME}.cpp and a file tests/${NAME}.h.

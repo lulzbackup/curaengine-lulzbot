@@ -458,9 +458,31 @@ void LayerPlan::addPolygonsByOptimizer(const Polygons& polygons, const GCodePath
         addPolygon(polygons[poly_idx], orderOptimizer.polyStart[poly_idx], config, wall_overlap_computation, wall_0_wipe_dist, spiralize, flow_ratio, always_retract);
     }
 }
-void LayerPlan::addLinesByOptimizer(const Polygons& polygons, const GCodePathConfig& config, SpaceFillType space_fill_type, int wipe_dist, float flow_ratio, std::optional<Point> near_start_location)
+void LayerPlan::addLinesByOptimizer(const Polygons& polygons, const GCodePathConfig& config, SpaceFillType space_fill_type, bool enable_travel_optimization, int wipe_dist, float flow_ratio, std::optional<Point> near_start_location)
 {
-    LineOrderOptimizer orderOptimizer(near_start_location.value_or(getLastPlannedPositionOrStartingPosition()));
+    Polygons boundary;
+    if (enable_travel_optimization && comb_boundary_inside.size() > 0)
+    {
+        // use the combing boundary inflated so that all infill lines are inside the boundary
+        int dist = 0;
+        if (layer_nr >= 0)
+        {
+            // determine how much the skin/infill lines overlap the combing boundary
+            for (const SliceMeshStorage& mesh : storage.meshes)
+            {
+                int overlap = std::max(mesh.getSettingInMicrons("skin_overlap_mm"), mesh.getSettingInMicrons("infill_overlap_mm"));
+                if (overlap > dist)
+                {
+                    dist = overlap;
+                }
+            }
+            dist += 100; // ensure boundary is slightly outside all skin/infill lines
+        }
+        boundary.add(comb_boundary_inside.offset(dist));
+        // simplify boundary to cut down processing time
+        boundary.simplify(100, 100);
+    }
+    LineOrderOptimizer orderOptimizer(near_start_location.value_or(getLastPlannedPositionOrStartingPosition()), &boundary);
     for (unsigned int line_idx = 0; line_idx < polygons.size(); line_idx++)
     {
         orderOptimizer.addPolygon(polygons[line_idx]);
@@ -679,8 +701,12 @@ void ExtruderPlan::processFanSpeedAndMinimalLayerTime(bool force_minimal_layer_t
     {
         fan_speed = fan_speed_layer_time_settings.cool_fan_speed_max;
     }
+    else if (fan_speed_layer_time_settings.cool_min_layer_time >= fan_speed_layer_time_settings.cool_min_layer_time_fan_speed_max)
+    {
+        fan_speed = fan_speed_layer_time_settings.cool_fan_speed_min;
+    }
     else if (force_minimal_layer_time && totalLayerTime < fan_speed_layer_time_settings.cool_min_layer_time_fan_speed_max)
-    { 
+    {
         // when forceMinimalLayerTime didn't change the extrusionSpeedFactor, we adjust the fan speed
         double fan_speed_diff = fan_speed_layer_time_settings.cool_fan_speed_max - fan_speed_layer_time_settings.cool_fan_speed_min;
         double layer_time_diff = fan_speed_layer_time_settings.cool_min_layer_time_fan_speed_max - fan_speed_layer_time_settings.cool_min_layer_time;

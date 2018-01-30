@@ -141,6 +141,7 @@ class SliceLayer
 {
 public:
     int printZ;     //!< The height at which this layer needs to be printed. Can differ from sliceZ due to the raft.
+    int thickness;  //!< The thickness of this layer. Can be different when using variable layer heights.
     std::vector<SliceLayerPart> parts;  //!< An array of LayerParts which contain the actual data. The parts are printed one at a time to minimize travel outside of the 3D model.
     Polygons openPolyLines; //!< A list of lines which were never hooked up into a 2D polygon. (Currently unused in normal operation)
 
@@ -236,6 +237,9 @@ public:
     std::vector<int> infill_angles; //!< a list of angle values (in degrees) which is cycled through to determine the infill angle of each layer
     std::vector<int> roofing_angles; //!< a list of angle values (in degrees) which is cycled through to determine the roofing angle of each layer
     std::vector<int> skin_angles; //!< a list of angle values (in degrees) which is cycled through to determine the skin angle of each layer
+    std::vector<Polygons> overhang_areas; //!< For each layer the areas that are classified as overhang on this mesh.
+    std::vector<Polygons> full_overhang_areas; //!< For each layer the full overhang without the tangent of the overhang angle removed, such that the overhang area adjoins the areas of the next layers.
+    std::vector<std::vector<Polygons>> overhang_points; //!< For each layer a list of points where point-overhang is detected. This is overhang that hasn't got any surface area, such as a corner pointing downwards.
     AABB3D bounding_box; //!< the mesh's bounding box
 
     SubDivCube* base_subdiv_cube;

@@ -1,4 +1,3 @@
-//Copyright (C) 2013 Ultimaker
 //Copyright (c) 2017 Ultimaker B.V.
 //CuraEngine is released under the terms of the AGPLv3 or higher.
 
@@ -37,6 +36,7 @@ GCodeExport::GCodeExport()
 
     isZHopped = 0;
     setFlavor(EGCodeFlavor::MARLIN);
+    firmware_retract = false;
     initial_bed_temp = 0;
 
     extruder_count = 0;
@@ -51,6 +51,7 @@ GCodeExport::~GCodeExport()
 void GCodeExport::preSetup(const MeshGroup* meshgroup)
 {
     setFlavor(meshgroup->getSettingAsGCodeFlavor("machine_gcode_flavor"));
+    firmware_retract = meshgroup->getSettingBoolean("machine_firmware_retract");
     use_extruder_offset_to_offset_coords = meshgroup->getSettingBoolean("machine_use_extruder_offset_to_offset_coords");
 
     extruder_count = meshgroup->getSettingAsCount("machine_extruder_count");
@@ -263,15 +264,6 @@ void GCodeExport::setFlavor(EGCodeFlavor flavor)
     else
     {
         is_volumatric = false;
-    }
-
-    if (flavor == EGCodeFlavor::BFB || flavor == EGCodeFlavor::MARLIN_VOLUMATRIC || flavor == EGCodeFlavor::ULTIGCODE)
-    {
-        firmware_retract = true;
-    }
-    else 
-    {
-        firmware_retract = false;
     }
 }
 
@@ -493,11 +485,11 @@ void GCodeExport::writeExtrusionMode(bool set_relative_extrusion_mode)
 {
     if (set_relative_extrusion_mode)
     {
-        *output_stream << "M83 ; relative extrusion mode" << new_line;
+        *output_stream << "M83 ;relative extrusion mode" << new_line;
     }
     else
     {
-        *output_stream << "M82 ; absolute extrusion mode" << new_line;
+        *output_stream << "M82 ;absolute extrusion mode" << new_line;
     }
 }
 
@@ -628,7 +620,7 @@ void GCodeExport::writeTravel(int x, int y, int z, double speed)
     assert(speed < 400 && speed > 1); // normal F values occurring in UM2 gcode (this code should not be compiled for release)
     assert(currentPosition != no_point3);
     assert(Point3(x, y, z) != no_point3);
-    assert((Point3(x,y,z) - currentPosition).vSize() < MM2INT(300)); // no crazy positions (this code should not be compiled for release)
+    assert((Point3(x,y,z) - currentPosition).vSize() < MM2INT(400)); // no crazy positions (this code should not be compiled for release)
 #endif //ASSERT_INSANE_OUTPUT
 
     const PrintFeatureType travel_move_type = extruder_attr[current_extruder].retraction_e_amount_current ? PrintFeatureType::MoveRetraction : PrintFeatureType::MoveCombing;
@@ -636,7 +628,7 @@ void GCodeExport::writeTravel(int x, int y, int z, double speed)
     CommandSocket::sendLineTo(travel_move_type, Point(x, y), display_width, layer_height, speed);
 
     *output_stream << "G0";
-    writeFXYZE(speed, x, y, z, current_e_value, PrintFeatureType::MoveCombing);
+    writeFXYZE(speed, x, y, z, current_e_value, travel_move_type);
 }
 
 void GCodeExport::writeExtrusion(int x, int y, int z, double speed, double extrusion_mm3_per_mm, PrintFeatureType feature, bool update_extrusion_offset)
@@ -648,7 +640,7 @@ void GCodeExport::writeExtrusion(int x, int y, int z, double speed, double extru
     assert(speed < 400 && speed > 1); // normal F values occurring in UM2 gcode (this code should not be compiled for release)
     assert(currentPosition != no_point3);
     assert(Point3(x, y, z) != no_point3);
-    assert((Point3(x,y,z) - currentPosition).vSize() < MM2INT(300)); // no crazy positions (this code should not be compiled for release)
+    assert((Point3(x,y,z) - currentPosition).vSize() < MM2INT(400)); // no crazy positions (this code should not be compiled for release)
     assert(extrusion_mm3_per_mm >= 0.0);
 #endif //ASSERT_INSANE_OUTPUT
 
@@ -1134,7 +1126,7 @@ void GCodeExport::writeMaxZFeedrate(double max_z_feedrate)
 {
     if (current_max_z_feedrate != max_z_feedrate)
     {
-        if (getFlavor() == EGCodeFlavor::REPRAP)
+        if (getFlavor() == EGCodeFlavor::REPRAP || getFlavor() == EGCodeFlavor::REPETIER)
         {
             *output_stream << "M203 Z" << PrecisionedDouble{2, max_z_feedrate * 60} << new_line;
         }
