@@ -3,7 +3,7 @@
 #ifndef CURAENGINE_CALCULATEADAPTIVELAYERHEIGHTS_H
 #define CURAENGINE_CALCULATEADAPTIVELAYERHEIGHTS_H
 
-#include "../MeshGroup.h"
+#include "../mesh.h"
 
 namespace cura {
 
@@ -44,7 +44,7 @@ public:
     /*!
      * The mesh to analyse. Uses it's triangles to calculate the adaptive layer heights.
      */
-    const MeshGroup* mesh_group = nullptr;
+    const Mesh* mesh = nullptr;
 
     /**
      * The maximum deviation from the base layer height.
@@ -93,7 +93,7 @@ public:
      */
     std::vector<AdaptiveLayer>* getLayers();
 
-    AdaptiveLayerHeights(MeshGroup* mesh_group, int layer_thickness, int initial_layer_thickness, coord_t variation, coord_t step_size, double threshold);
+    AdaptiveLayerHeights(Mesh* mesh, int layer_thickness, int initial_layer_thickness, coord_t variation, coord_t step_size, double threshold);
 
 private:
 
