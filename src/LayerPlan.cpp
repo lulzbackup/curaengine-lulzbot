@@ -763,6 +763,22 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
     
     gcode.writeLayerComment(layer_nr);
 
+    // Z-backlash fading
+    if (storage.getSettingInMillimeters("backlash_fading_distance")) {
+        int64_t backlash_fading_dist = MM2INT(storage.getSettingInMillimeters("backlash_fading_distance"));
+        if (backlash_fading_dist > 0) {
+            std::ostringstream tmp;
+            tmp << "M425 F";
+            if (layer_nr==0)
+                tmp << "1.0";
+            else if (z > backlash_fading_dist)
+                tmp << "0.0";
+            else
+                tmp << 1.0 - (double) z/backlash_fading_dist;
+            gcode.writeLine(tmp.str().c_str()); 
+        }
+    }
+
     // flow-rate compensation
     gcode.setFlowRateExtrusionSettings(storage.getSettingInMillimeters("flow_rate_max_extrusion_offset"), storage.getSettingInPercentage("flow_rate_extrusion_offset_factor") / 100);
 
