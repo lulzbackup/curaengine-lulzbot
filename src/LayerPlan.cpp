@@ -253,7 +253,7 @@ std::optional<std::pair<Point, bool>> LayerPlan::getFirstTravelDestinationState(
     return ret;
 }
 
-GCodePath& LayerPlan::addTravel(Point p, bool force_comb_retract)
+GCodePath& LayerPlan::addTravel(Point p, bool force_comb_retract, bool force_z_hop)
 {
     const GCodePathConfig& travel_config = configs_storage.travel_config_per_extruder[getExtruder()];
     const RetractionConfig& retraction_config = storage.retraction_config_per_extruder[getExtruder()];
@@ -264,7 +264,7 @@ GCodePath& LayerPlan::addTravel(Point p, bool force_comb_retract)
 
     const SettingsBaseVirtual* extr = getLastPlannedExtruderTrainSettings();
 
-    const bool perform_z_hops = extr->getSettingBoolean("retraction_hop_enabled");
+    const bool perform_z_hops = extr->getSettingBoolean("retraction_hop_enabled") || force_z_hop;
 
     const bool is_first_travel_of_extruder_after_switch = extruder_plans.back().paths.size() == 0 && (extruder_plans.size() > 1 || last_extruder_previous_layer != getExtruder());
     bool bypass_combing = is_first_travel_of_extruder_after_switch && extr->getSettingBoolean("retraction_hop_after_extruder_switch");
