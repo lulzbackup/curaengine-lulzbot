@@ -805,12 +805,16 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
     {
         ExtruderPlan& extruder_plan = extruder_plans[extruder_plan_idx];
         const RetractionConfig& retraction_config = storage.retraction_config_per_extruder[extruder_plan.extruder];
+        bool ignoreZhopEnd = false;
 
         if (extruder != extruder_plan.extruder)
         {
             int prev_extruder = extruder;
             extruder = extruder_plan.extruder;
+
+            gcode.writeZhopStart(retraction_config.zHop);
             gcode.switchExtruder(extruder, storage.extruder_switch_retraction_config_per_extruder[prev_extruder]);
+            ignoreZhopEnd = true;
 
             const ExtruderTrain* train = storage.meshgroup->getExtruderTrain(extruder);
             if (train->getSettingInMillimetersPerSecond("max_feedrate_z_override") > 0)
@@ -892,7 +896,7 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
                 {
                     gcode.writeZhopStart(retraction_config.zHop);
                 }
-                else
+                else if(!ignoreZhopEnd)
                 {
                     gcode.writeZhopEnd();
                 }
@@ -902,6 +906,11 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
                 gcode.writeTypeComment(path.config->type);
                 last_extrusion_config = path.config;
                 update_extrusion_offset = true;
+                if(ignoreZhopEnd)
+                {
+                    gcode.writeZhopEnd();
+                    ignoreZhopEnd = false;
+                }
             } else {
                 update_extrusion_offset = false;
             }
