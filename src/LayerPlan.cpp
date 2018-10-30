@@ -892,13 +892,16 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
             if (path.retract)
             {
                 gcode.writeRetraction(retraction_config);
-                if (path.perform_z_hop)
+                if(!ignoreZhopEnd)
                 {
-                    gcode.writeZhopStart(retraction_config.zHop);
-                }
-                else if(!ignoreZhopEnd)
-                {
-                    gcode.writeZhopEnd();
+                    if (path.perform_z_hop)
+                    {
+                        gcode.writeZhopStart(retraction_config.zHop);
+                    }
+                    else
+                    {
+                        gcode.writeZhopEnd();
+                    }
                 }
             }
             if (!path.config->isTravelPath() && last_extrusion_config != path.config)
@@ -906,11 +909,6 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
                 gcode.writeTypeComment(path.config->type);
                 last_extrusion_config = path.config;
                 update_extrusion_offset = true;
-                if(ignoreZhopEnd)
-                {
-                    gcode.writeZhopEnd();
-                    ignoreZhopEnd = false;
-                }
             } else {
                 update_extrusion_offset = false;
             }
@@ -964,6 +962,13 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
                     )
                     {
                         sendLineTo(paths[path_idx+2].config->type, paths[path_idx+2].points.back(), paths[path_idx+2].getLineWidthForLayerView(), paths[path_idx+2].config->getLayerThickness(), speed);
+
+                        if(ignoreZhopEnd)
+                        {
+                            gcode.writeZhopEnd();
+                            ignoreZhopEnd = false;
+                        }
+
                         gcode.writeExtrusion(paths[path_idx+2].points.back(), speed, paths[path_idx+1].getExtrusionMM3perMM(), paths[path_idx+2].config->type, update_extrusion_offset);
                         path_idx += 2;
                     }
@@ -972,6 +977,13 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
                         for(unsigned int point_idx = 0; point_idx < path.points.size(); point_idx++)
                         {
                             sendLineTo(path.config->type, path.points[point_idx], path.getLineWidthForLayerView(), path.config->getLayerThickness(), speed);
+
+                            if(ignoreZhopEnd)
+                            {
+                                gcode.writeZhopEnd();
+                                ignoreZhopEnd = false;
+                            }
+
                             gcode.writeExtrusion(path.points[point_idx], speed, path.getExtrusionMM3perMM(), path.config->type, update_extrusion_offset);
                         }
                     }
