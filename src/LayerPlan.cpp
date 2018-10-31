@@ -812,8 +812,7 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
             int prev_extruder = extruder;
             extruder = extruder_plan.extruder;
 
-            gcode.writeZhopStart(retraction_config.zHop);
-            gcode.switchExtruder(extruder, storage.extruder_switch_retraction_config_per_extruder[prev_extruder]);
+            gcode.switchExtruder(extruder, storage.extruder_switch_retraction_config_per_extruder[prev_extruder], retraction_config.zHop);
             ignoreZhopEnd = true;
 
             const ExtruderTrain* train = storage.meshgroup->getExtruderTrain(extruder);
