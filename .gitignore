@@ -48,6 +48,7 @@ nbproject/*
 .idea
 *.depend
 .*.swp
+.vscode
 
 ## Documentation.
 documentation/html/*

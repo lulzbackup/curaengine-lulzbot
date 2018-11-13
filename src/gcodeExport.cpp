@@ -968,6 +968,7 @@ void GCodeExport::writePrimeTrain(double travel_speed)
         if (!extruder_attr[current_extruder].prime_pos_is_abs)
         {
             prime_pos += currentPosition;
+            if (isZHopped) prime_pos.z -= isZHopped;
         }
         writeTravel(prime_pos, travel_speed);
     }
