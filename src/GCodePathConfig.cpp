@@ -1,6 +1,8 @@
-/** Copyright (C) 2016 Ultimaker - Released under terms of the AGPLv3 License */
+//Copyright (c) 2018 Ultimaker B.V.
+//CuraEngine is released under the terms of the AGPLv3 or higher.
 
-#include "utils/intpoint.h" // INT2MM
+
+#include "utils/IntPoint.h" // INT2MM
 #include "GCodePathConfig.h"
 
 namespace cura 
@@ -13,22 +15,26 @@ GCodePathConfig::GCodePathConfig(const GCodePathConfig& other)
 , layer_thickness(other.layer_thickness)
 , flow(other.flow)
 , extrusion_mm3_per_mm(other.extrusion_mm3_per_mm)
+, is_bridge_path(other.is_bridge_path)
+, fan_speed(other.fan_speed)
 {
 }
 
 
 
-GCodePathConfig::GCodePathConfig(PrintFeatureType type, int line_width, int layer_height, double flow, GCodePathConfig::SpeedDerivatives speed_derivatives)
+GCodePathConfig::GCodePathConfig(const PrintFeatureType& type, const coord_t line_width, const coord_t layer_height, const Ratio& flow, const GCodePathConfig::SpeedDerivatives speed_derivatives, const bool is_bridge_path, const double fan_speed)
 : type(type)
 , speed_derivatives(speed_derivatives)
 , line_width(line_width)
 , layer_thickness(layer_height)
 , flow(flow)
 , extrusion_mm3_per_mm(calculateExtrusion())
+, is_bridge_path(is_bridge_path)
+, fan_speed(fan_speed)
 {
 }
 
-void GCodePathConfig::smoothSpeed(GCodePathConfig::SpeedDerivatives first_layer_config, int layer_nr, int max_speed_layer_nr) 
+void GCodePathConfig::smoothSpeed(GCodePathConfig::SpeedDerivatives first_layer_config, const LayerIndex& layer_nr, const LayerIndex& max_speed_layer_nr) 
 {
     double max_speed_layer = max_speed_layer_nr;
     speed_derivatives.speed = (speed_derivatives.speed * layer_nr) / max_speed_layer + (first_layer_config.speed * (max_speed_layer - layer_nr) / max_speed_layer);
@@ -41,34 +47,34 @@ double GCodePathConfig::getExtrusionMM3perMM() const
     return extrusion_mm3_per_mm;
 }
 
-double GCodePathConfig::getSpeed() const
+Velocity GCodePathConfig::getSpeed() const
 {
     return speed_derivatives.speed;
 }
 
-double GCodePathConfig::getAcceleration() const
+Acceleration GCodePathConfig::getAcceleration() const
 {
     return speed_derivatives.acceleration;
 }
 
-double GCodePathConfig::getJerk() const
+Velocity GCodePathConfig::getJerk() const
 {
     return speed_derivatives.jerk;
 }
 
-int GCodePathConfig::getLineWidth() const
+coord_t GCodePathConfig::getLineWidth() const
 {
     return line_width;
 }
 
-int GCodePathConfig::getLayerThickness() const
+coord_t GCodePathConfig::getLayerThickness() const
 {
-    return this->layer_thickness;
+    return layer_thickness;
 }
 
 const PrintFeatureType& GCodePathConfig::getPrintFeatureType() const
 {
-    return this->type;
+    return type;
 }
 
 bool GCodePathConfig::isTravelPath() const
@@ -76,14 +82,24 @@ bool GCodePathConfig::isTravelPath() const
     return line_width == 0;
 }
 
-double GCodePathConfig::getFlowPercentage() const
+bool GCodePathConfig::isBridgePath() const
+{
+    return is_bridge_path;
+}
+
+double GCodePathConfig::getFanSpeed() const
+{
+    return fan_speed;
+}
+
+Ratio GCodePathConfig::getFlowRatio() const
 {
     return flow;
 }
 
 double GCodePathConfig::calculateExtrusion() const
 {
-    return INT2MM(line_width) * INT2MM(layer_thickness) * double(flow) / 100.0;
+    return INT2MM(line_width) * INT2MM(layer_thickness) * double(flow);
 }
 
 
