@@ -474,7 +474,7 @@ void FffGcodeWriter::processStartingCode(const SliceDataStorage& storage, const 
     const Settings& mesh_group_settings = Application::getInstance().current_slice->scene.current_mesh_group->settings;
 
     gcode.writeExtrusionMode(false); // ensure absolute extrusion mode is set before the start gcode
-    gcode.writeLine(("M221 S" + storage.getSettingString("material_flow_layer_0")).c_str());
+    gcode.writeLine(("M221 S" + mesh_group_settings.get<std::string>("material_flow_layer_0")).c_str());
     gcode.writeCode(mesh_group_settings.get<std::string>("machine_start_gcode").c_str());
 
     if (gcode.getFlavor() == EGCodeFlavor::BFB)

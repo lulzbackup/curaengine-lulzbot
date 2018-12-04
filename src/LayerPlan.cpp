@@ -353,7 +353,7 @@ GCodePath& LayerPlan::addTravel(Point p, bool force_comb_retract, bool force_z_h
 
     const ExtruderTrain* extruder = getLastPlannedExtruderTrain();
 
-    const bool perform_z_hops = extruder->getSettingBoolean("retraction_hop_enabled") || force_z_hop;
+    const bool perform_z_hops = extruder->settings.get<bool>("retraction_hop_enabled") || force_z_hop;
     const coord_t maximum_travel_resolution = extruder->settings.get<coord_t>("meshfix_maximum_travel_resolution");
 
     const bool is_first_travel_of_extruder_after_switch = extruder_plans.back().paths.size() == 1 && (extruder_plans.size() > 1 || last_extruder_previous_layer != getExtruder());
@@ -1308,10 +1308,11 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
     gcode.setLayerNr(layer_nr);
     
     gcode.writeLayerComment(layer_nr);
+    const Settings& mesh_group_settings = Application::getInstance().current_slice->scene.current_mesh_group->settings;
 
     // Z-backlash fading
-    if (storage.getSettingInMillimeters("backlash_fading_distance")) {
-        int64_t backlash_fading_dist = MM2INT(storage.getSettingInMillimeters("backlash_fading_distance"));
+    if (mesh_group_settings.get<size_t>("backlash_fading_distance")) {
+        int64_t backlash_fading_dist = mesh_group_settings.get<coord_t>("backlash_fading_distance");
         if (backlash_fading_dist > 0) {
             std::ostringstream tmp;
             tmp << "M425 F";
@@ -1326,7 +1327,6 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
     }
 
     // flow-rate compensation
-    const Settings& mesh_group_settings = Application::getInstance().current_slice->scene.current_mesh_group->settings;
     gcode.setFlowRateExtrusionSettings(mesh_group_settings.get<double>("flow_rate_max_extrusion_offset"), mesh_group_settings.get<Ratio>("flow_rate_extrusion_offset_factor")); //Offset is in mm.
 
     if (layer_nr == 1 - static_cast<LayerIndex>(Raft::getTotalExtraLayers()) && mesh_group_settings.get<bool>("machine_heated_bed") && mesh_group_settings.get<Temperature>("material_bed_temperature") != 0)
