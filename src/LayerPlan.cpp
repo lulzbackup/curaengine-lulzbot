@@ -1220,6 +1220,7 @@ void ExtruderPlan::processFanSpeedAndMinimalLayerTime(bool force_minimal_layer_t
 {
     TimeMaterialEstimates estimates = computeNaiveTimeEstimates(starting_position);
     totalPrintTime = estimates.getTotalTime();
+    if(totalPrintTime < fan_speed_layer_time_settings.cool_min_layer_time) force_minimal_layer_time = true;
     if (force_minimal_layer_time)
     {
         forceMinimalLayerTime(fan_speed_layer_time_settings.cool_min_layer_time, fan_speed_layer_time_settings.cool_min_speed, estimates.getTravelTime(), estimates.getExtrudeTime());
@@ -1289,8 +1290,8 @@ void LayerPlan::processFanSpeedAndMinimalLayerTime(Point starting_position)
     for (unsigned int extr_plan_idx = 0; extr_plan_idx < extruder_plans.size(); extr_plan_idx++)
     {
         ExtruderPlan& extruder_plan = extruder_plans[extr_plan_idx];
-        bool force_minimal_layer_time = extr_plan_idx == extruder_plans.size() - 1;
-        extruder_plan.processFanSpeedAndMinimalLayerTime(force_minimal_layer_time, starting_position);
+        //bool force_minimal_layer_time = extr_plan_idx == extruder_plans.size() - 1;
+        extruder_plan.processFanSpeedAndMinimalLayerTime(false, starting_position);
         if (!extruder_plan.paths.empty() && !extruder_plan.paths.back().points.empty())
         {
             starting_position = extruder_plan.paths.back().points.back();
