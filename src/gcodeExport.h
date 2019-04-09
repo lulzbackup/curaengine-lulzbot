@@ -394,7 +394,7 @@ public:
      * \param new_extruder The extruder to switch to
      * \param retraction_config_old_extruder The extruder switch retraction config of the old extruder, to perform the extruder switch retraction with.
      */
-    void switchExtruder(size_t new_extruder, const RetractionConfig& retraction_config_old_extruder, int z_hop_amount);
+    void switchExtruder(size_t new_extruder, const RetractionConfig& retraction_config_old_extruder, Point first_location_of_new_extruder, int z_hop_amount);
 
     void writeCode(const char* str);
     

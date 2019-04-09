@@ -1355,7 +1355,7 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
         {
             int prev_extruder = extruder_nr;
             extruder_nr = extruder_plan.extruder_nr;
-            gcode.switchExtruder(extruder_nr, storage.extruder_switch_retraction_config_per_extruder[prev_extruder], retraction_config.zHop);
+            gcode.switchExtruder(extruder_nr, storage.extruder_switch_retraction_config_per_extruder[prev_extruder], extruder_plan.paths[0].points[0], retraction_config.zHop);
             ignoreZhopEnd = true;
 
             const ExtruderTrain& extruder = Application::getInstance().current_slice->scene.extruders[extruder_nr];

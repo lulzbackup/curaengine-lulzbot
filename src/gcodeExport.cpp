@@ -958,7 +958,7 @@ void GCodeExport::startExtruder(const size_t new_extruder)
     setExtruderFanNumber(new_extruder);
 }
 
-void GCodeExport::switchExtruder(size_t new_extruder, const RetractionConfig& retraction_config_old_extruder, int z_hop_amount = 0)
+void GCodeExport::switchExtruder(size_t new_extruder, const RetractionConfig& retraction_config_old_extruder, Point first_location_of_new_extruder, int z_hop_amount = 0)
 {
     if (current_extruder == new_extruder)
     {
@@ -990,6 +990,25 @@ void GCodeExport::switchExtruder(size_t new_extruder, const RetractionConfig& re
             writeExtrusionMode(true); // restore relative extrusion mode
         }
     }
+
+    const Settings& mesh_group_settings = Application::getInstance().current_slice->scene.current_mesh_group->settings;
+    if(mesh_group_settings.get<bool>("prime_tower_enable"))
+    {
+        const coord_t x = mesh_group_settings.get<coord_t>("prime_tower_position_x");
+        const coord_t y = mesh_group_settings.get<coord_t>("prime_tower_position_y");
+        writeTravel(Point(x, y), Application::getInstance().current_slice->scene.extruders[old_extruder].settings.get<Velocity>("speed_travel"));
+    }
+    else
+    {
+        Settings old_extruder_settings = Application::getInstance().current_slice->scene.extruders[old_extruder].settings;
+        Settings new_extruder_settings = Application::getInstance().current_slice->scene.extruders[new_extruder].settings;
+        Point old_extruder_offset(old_extruder_settings.get<coord_t>("machine_nozzle_offset_x"), old_extruder_settings.get<coord_t>("machine_nozzle_offset_y"));
+        Point new_extruder_offset(new_extruder_settings.get<coord_t>("machine_nozzle_offset_x"), new_extruder_settings.get<coord_t>("machine_nozzle_offset_y"));
+        Point extruder_offset(new_extruder_offset - old_extruder_offset);
+        Point target(first_location_of_new_extruder - extruder_offset);
+        writeTravel(target, Application::getInstance().current_slice->scene.extruders[old_extruder].settings.get<Velocity>("speed_travel"));
+    }
+    
 
     startExtruder(new_extruder);
 }
