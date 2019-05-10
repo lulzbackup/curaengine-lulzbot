@@ -1330,10 +1330,18 @@ void LayerPlan::writeGCode(GCodeExport& gcode)
     // flow-rate compensation
     gcode.setFlowRateExtrusionSettings(mesh_group_settings.get<double>("flow_rate_max_extrusion_offset"), mesh_group_settings.get<Ratio>("flow_rate_extrusion_offset_factor")); //Offset is in mm.
 
-    if (layer_nr == 1 - static_cast<LayerIndex>(Raft::getTotalExtraLayers()) && mesh_group_settings.get<bool>("machine_heated_bed") && mesh_group_settings.get<Temperature>("material_bed_temperature") != 0)
+    if (layer_nr == 1 - static_cast<LayerIndex>(Raft::getTotalExtraLayers()))
     {
-        constexpr bool wait = false;
-        gcode.writeBedTemperatureCommand(mesh_group_settings.get<Temperature>("material_bed_temperature"), wait);
+        if(mesh_group_settings.get<bool>("machine_heated_bed") && mesh_group_settings.get<Temperature>("material_bed_temperature") != 0)
+        {
+            constexpr bool wait = false;
+            gcode.writeBedTemperatureCommand(mesh_group_settings.get<Temperature>("material_bed_temperature"), wait);
+        }
+        auto extruders = Application::getInstance().current_slice->scene.extruders;
+        for(int extruder_nr = 0; extruder_nr < extruders.size(); extruder_nr++)
+        {
+            gcode.writeLine(("M221 S" + extruders[extruder_nr].settings.get<std::string>("material_flow") + " T" + std::to_string(extruder_nr)).c_str());
+        }
     }
 
     gcode.setZ(z);
