@@ -1028,7 +1028,7 @@ void GCodeExport::startExtruder(const size_t new_extruder)
     setExtruderFanNumber(new_extruder);
 }
 
-void GCodeExport::switchExtruder(size_t new_extruder, const RetractionConfig& retraction_config_old_extruder, Point first_location_of_new_extruder, coord_t perform_z_hop = 0)
+void GCodeExport::switchExtruder(size_t new_extruder, const RetractionConfig& retraction_config_old_extruder, Point first_location_of_new_extruder, coord_t perform_z_hop)
 {
     if (current_extruder == new_extruder)
     {
