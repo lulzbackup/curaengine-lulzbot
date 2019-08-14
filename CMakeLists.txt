@@ -48,7 +48,7 @@ endif()
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS 3.1)
     set(CMAKE_CXX_STANDARD 11)
-elseif(not MSVC)
+else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 endif()
 
@@ -68,42 +68,19 @@ option(BUILD_TESTS OFF)
 # Add a compiler flag to check the output for insane values if we are in debug mode.
 if(CMAKE_BUILD_TYPE_UPPER MATCHES "DEBUG" OR CMAKE_BUILD_TYPE_UPPER MATCHES "RELWITHDEBINFO")
     message(STATUS "Building debug release of CuraEngine.")
-    if (NOT MSVC)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -O0 -g -fno-omit-frame-pointer")
-    endif()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -O0 -g -fno-omit-frame-pointer")
     add_definitions(-DASSERT_INSANE_OUTPUT)
     add_definitions(-DUSE_CPU_TIME)
     add_definitions(-DDEBUG)
 endif()
 
-if (MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /permissive- /Zc:twoPhase- /EHsc /W3")
-    if (MSVC_STATIC_RUNTIME)
-        foreach(flag_var
-            CMAKE_CXX_FLAGS
-            CMAKE_CXX_FLAGS_DEBUG
-            CMAKE_CXX_FLAGS_RELEASE
-            CMAKE_CXX_FLAGS_MINSIZEREL
-            CMAKE_CXX_FLAGS_RELWITHDEBINFO
-            )
-            if(${flag_var} MATCHES "/MD")
-                string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-            endif()
-        endforeach()
-    endif()
-else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall") # Add warnings
-endif()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall") # Add warnings
 
 option (ENABLE_MORE_COMPILER_OPTIMIZATION_FLAGS
     "Enable more optimization flags" ON)
 if (ENABLE_MORE_COMPILER_OPTIMIZATION_FLAGS AND NOT (CMAKE_BUILD_TYPE_UPPER MATCHES "DEBUG"))
     message (STATUS "Compile with more optimization flags")
-    if (MSVC)
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} /fp:fast")
-    else()
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -Ofast -funroll-loops")
-    endif()
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -Ofast -funroll-loops")
 endif ()
 
 if(NOT APPLE AND NOT WIN32)
@@ -285,13 +262,11 @@ set_target_properties(_CuraEngine PROPERTIES COMPILE_DEFINITIONS "VERSION=\"${CU
 if(WIN32)
   message(STATUS "Using windres")
   set(RES_FILES "CuraEngine.rc")
+  set(CMAKE_RC_COMPILER_INIT windres)
   ENABLE_LANGUAGE(RC)
-  if(NOT MSVC)
-    SET(CMAKE_RC_COMPILER_INIT windres)
-    SET(CMAKE_RC_COMPILE_OBJECT
-        "<CMAKE_RC_COMPILER> <FLAGS> -O coff <DEFINES> -i <SOURCE> -o <OBJECT>"
-        )
- endif()
+  SET(CMAKE_RC_COMPILE_OBJECT
+      "<CMAKE_RC_COMPILER> <FLAGS> -O coff <DEFINES> -i <SOURCE> -o <OBJECT>"
+      )
 endif(WIN32)
 
 if (UNIX)
