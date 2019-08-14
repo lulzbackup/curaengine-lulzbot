@@ -3,7 +3,8 @@
 
 project(CuraEngine)
 
-cmake_minimum_required(VERSION 3.6.0)
+cmake_minimum_required(VERSION 3.0.0)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH};${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -45,10 +46,14 @@ else()
     set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS_RELEASE_INIT})
 endif()
 
-set(CMAKE_CXX_STANDARD 11)
+if(NOT ${CMAKE_VERSION} VERSION_LESS 3.1)
+    set(CMAKE_CXX_STANDARD 11)
+elseif(not MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+endif()
 
 if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -stdlib=libc++")
 endif()
 
 if(NOT DEFINED LIB_SUFFIX)
@@ -304,8 +309,6 @@ set_target_properties(CuraEngine PROPERTIES COMPILE_DEFINITIONS "VERSION=\"${CUR
 
 # Compiling the test environment.
 if (BUILD_TESTS)
-    include(CTest)
-
     message(STATUS "Building tests...")
     set(GTEST_USE_STATIC_LIBS true)
     set(GMOCK_ROOT "${CMAKE_CURRENT_BINARY_DIR}/gmock")
@@ -317,6 +320,8 @@ if (BUILD_TESTS)
     add_definitions(-DBUILD_TESTS)
 
     target_compile_definitions(_CuraEngine PUBLIC BUILD_TESTS=1)
+
+    enable_testing()
 
     #To make sure that the tests are built before running them, add the building of these tests as an additional test.
     add_custom_target(build_all_tests)
