@@ -462,6 +462,11 @@ void FffGcodeWriter::processStartingCode(const SliceDataStorage& storage, const 
 
     gcode.writeComment("Generated with Cura_SteamEngine " VERSION);
 
+    const Settings& mesh_group_settings = Application::getInstance().current_slice->scene.current_mesh_group->settings;
+
+    gcode.writeExtrusionMode(false); // ensure absolute extrusion mode is set before the start gcode
+    gcode.writeCode(mesh_group_settings.get<std::string>("machine_start_gcode").c_str());
+
     if (gcode.getFlavor() == EGCodeFlavor::GRIFFIN)
     {
         gcode.writeCode("T0");
@@ -470,11 +475,6 @@ void FffGcodeWriter::processStartingCode(const SliceDataStorage& storage, const 
     {
         processInitialLayerTemperature(storage, start_extruder_nr);
     }
-
-    const Settings& mesh_group_settings = Application::getInstance().current_slice->scene.current_mesh_group->settings;
-
-    gcode.writeExtrusionMode(false); // ensure absolute extrusion mode is set before the start gcode
-    gcode.writeCode(mesh_group_settings.get<std::string>("machine_start_gcode").c_str());
 
     auto extruders = Application::getInstance().current_slice->scene.extruders;
     for(int extruder_nr = 0; extruder_nr < extruders.size(); extruder_nr++)
